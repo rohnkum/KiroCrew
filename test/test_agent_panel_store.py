@@ -376,6 +376,23 @@ def test_an_installed_template_joins_the_available_set():
     assert {agent_panel.DEFAULT_TEMPLATE_ID, BESPOKE} <= set(agent_panel.available_templates())
 
 
+def test_a_linked_override_resolve_refuses_is_neither_listed_nor_selected(tmp_path):
+    """An override linked in from outside the directory (a stow or chezmoi layout)
+    is one ``resolve_template`` refuses, so the listing must not offer it and the
+    crew named after it must fall back to the generic template and publish."""
+    elsewhere = tmp_path / "dotfiles" / f"{BESPOKE}.html"
+    elsewhere.parent.mkdir(parents=True)
+    elsewhere.write_text(_BESPOKE_HTML, encoding="utf-8")
+    over = agent_panel.override_templates_dir()
+    over.mkdir(parents=True, exist_ok=True)
+    (over / f"{BESPOKE}.html").symlink_to(elsewhere)
+
+    assert BESPOKE not in agent_panel.available_templates()
+    chosen = agent_panel.template_for_crew(BESPOKE)
+    assert chosen == agent_panel.DEFAULT_TEMPLATE_ID
+    agent_panel.publish(BESPOKE, template=chosen, data={"cycle": 1}, crew=BESPOKE)
+
+
 def test_an_operator_override_wins_over_the_shipped_template():
     over = agent_panel.override_templates_dir()
     over.mkdir(parents=True, exist_ok=True)

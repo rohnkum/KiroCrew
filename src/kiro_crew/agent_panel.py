@@ -388,11 +388,27 @@ def available_templates() -> list[str]:
         except OSError:
             continue
         for entry in entries:
-            if entry.suffix != ".html" or not entry.is_file():
+            if entry.suffix != ".html" or not TEMPLATE_ID_RE.match(entry.stem):
                 continue
-            if TEMPLATE_ID_RE.match(entry.stem):
+            if _contained_template(root, entry.stem) is not None:
                 found.add(entry.stem)
     return sorted(found)
+
+
+def _contained_template(root: Path, template_id: str) -> Path | None:
+    """The real path of ``<root>/<template_id>.html``, or None.
+
+    None when the file is missing, is not a regular file, or is a symlink whose
+    target lies outside *root*. ``available_templates`` and ``resolve_template``
+    both go through it, so the listing offers exactly the ids that resolve.
+    """
+    try:
+        resolved = (root / f"{template_id}.html").resolve()
+        if resolved.is_relative_to(root.resolve()) and resolved.is_file():
+            return resolved
+    except (OSError, ValueError):
+        pass
+    return None
 
 
 def _slug_candidate(name: str) -> str:
@@ -446,14 +462,13 @@ def resolve_template(template_id: str) -> str:
     if not TEMPLATE_ID_RE.match(template_id or ""):
         raise PanelError("bad_template_id", f"invalid template id: {template_id!r}")
     for root in (override_templates_dir(), shipped_templates_dir()):
-        candidate = root / f"{template_id}.html"
+        # The id is already pinned to a traversal-free pattern; the containment
+        # check catches a symlink inside the override directory pointing
+        # somewhere else entirely.
+        resolved = _contained_template(root, template_id)
+        if resolved is None:
+            continue
         try:
-            # The id is already pinned to a traversal-free pattern; this second
-            # check catches a symlink inside the override directory pointing
-            # somewhere else entirely.
-            resolved = candidate.resolve()
-            if not resolved.is_relative_to(root.resolve()):
-                continue
             return resolved.read_text(encoding="utf-8")
         except (OSError, ValueError):
             continue
