@@ -74,6 +74,7 @@ from kiro_crew.dashboard.source_providers.contract import (
     SourceProviderNotConfigured,
     SourceRef,
 )
+from kiro_crew.http_proxy import resolve_proxy
 from kiro_crew.secrets import SecretVault
 
 logger = logging.getLogger(LOGGER_NAME)
@@ -289,8 +290,11 @@ class _Client:
         # raw read asks for text, which is what makes Gerrit send the base64 body
         # its REST documentation describes.
         headers = {"Accept": "text/plain"} if raw else None
+        proxy = await asyncio.to_thread(resolve_proxy, url)
         try:
-            async with self.session.get(url, allow_redirects=False, headers=headers) as resp:
+            async with self.session.get(
+                url, allow_redirects=False, headers=headers, proxy=proxy
+            ) as resp:
                 if resp.status in {401, 403}:
                     if not self.has_credential:
                         raise SourceProviderNotConfigured(_setup_guidance(host))

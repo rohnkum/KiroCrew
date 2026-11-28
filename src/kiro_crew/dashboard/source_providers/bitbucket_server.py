@@ -38,6 +38,7 @@ from kiro_crew.dashboard.source_providers.contract import (
     SourceProviderNotConfigured,
     SourceRef,
 )
+from kiro_crew.http_proxy import resolve_proxy
 from kiro_crew.secrets import SecretVault
 
 logger = logging.getLogger(LOGGER_NAME)
@@ -191,8 +192,9 @@ class _Client:
         """
         host = self.ref.host
         _require_listed(host)
+        proxy = await asyncio.to_thread(resolve_proxy, url)
         try:
-            async with self.session.get(url, allow_redirects=False) as resp:
+            async with self.session.get(url, allow_redirects=False, proxy=proxy) as resp:
                 if resp.status in {401, 403}:
                     # Every remedy here names the token's vault entry, so it also
                     # rides as its own field: with two or more hosts listed the

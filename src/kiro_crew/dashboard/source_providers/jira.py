@@ -29,6 +29,7 @@ from kiro_crew.config.loader import (
 from kiro_crew.dashboard.handlers._shared import read_capped_response
 from kiro_crew.dashboard.source_providers import adf, projection, sanitize
 from kiro_crew.dashboard.source_providers.contract import SourceProviderError, SourceRef
+from kiro_crew.http_proxy import resolve_proxy
 from kiro_crew.secrets import SecretVault
 
 _JIRA_FETCH_TIMEOUT = 15  # seconds per HTTP call
@@ -342,9 +343,10 @@ async def _jira_get_json(
     Redirects are not followed, so the credential is only ever sent to *host*.
     """
     timeout = aiohttp.ClientTimeout(total=_JIRA_FETCH_TIMEOUT)
+    proxy = await asyncio.to_thread(resolve_proxy, url)
     try:
         async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
-            async with session.get(url, allow_redirects=False) as resp:
+            async with session.get(url, allow_redirects=False, proxy=proxy) as resp:
                 if resp.status == 401:
                     raise SourceProviderError(
                         "Jira authentication failed. For Cloud, verify both email and API token in "

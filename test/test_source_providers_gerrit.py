@@ -376,6 +376,7 @@ class _Instance:
                 *,
                 allow_redirects: bool = True,
                 headers: dict[str, str] | None = None,
+                proxy: str | None = None,
             ) -> _Response:
                 sent = {**(instance_headers or {}), **(headers or {})}
                 instance.requests.append(

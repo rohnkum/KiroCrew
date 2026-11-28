@@ -50,6 +50,7 @@ from kiro_crew.dashboard.source_providers import (
 )
 from kiro_crew.dashboard.source_providers.contract import SourceProviderError, SourceRef
 from kiro_crew.dashboard.source_providers.issue_search import IssueQuery, IssueQueryError
+from kiro_crew.http_proxy import resolve_proxy
 from kiro_crew.secrets import SecretVault
 
 logger = logging.getLogger(LOGGER_NAME)
@@ -201,9 +202,10 @@ async def _get(url: str, key: str) -> tuple[int, str, bytes]:
     """GET *url* (already encoded); ``(status, X-Total-Count, body)``, body capped."""
     headers = {"x-sn-apikey": key, "Accept": "application/json"}
     timeout = ClientTimeout(total=_FETCH_TIMEOUT)
+    proxy = await asyncio.to_thread(resolve_proxy, url)
     async with ClientSession(timeout=timeout) as session:
         async with session.get(
-            URL(url, encoded=True), headers=headers, allow_redirects=False
+            URL(url, encoded=True), headers=headers, allow_redirects=False, proxy=proxy
         ) as resp:
             body = await _shared.read_capped_response(resp, sanitize._MAX_PAYLOAD_BYTES)
             return resp.status, resp.headers.get("X-Total-Count", ""), body

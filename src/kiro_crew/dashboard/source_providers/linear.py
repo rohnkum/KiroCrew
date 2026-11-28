@@ -43,6 +43,7 @@ from kiro_crew.dashboard.source_providers import (
 )
 from kiro_crew.dashboard.source_providers.contract import SourceProviderError, SourceRef
 from kiro_crew.dashboard.source_providers.issue_search import IssueQuery, IssueQueryError
+from kiro_crew.http_proxy import resolve_proxy
 from kiro_crew.secrets import SecretVault
 
 logger = logging.getLogger(LOGGER_NAME)
@@ -167,9 +168,10 @@ async def _post(body: bytes, key: str) -> tuple[int, bytes]:
         "Accept": "application/json",
     }
     timeout = ClientTimeout(total=_FETCH_TIMEOUT)
+    proxy = await asyncio.to_thread(resolve_proxy, _API_URL)
     async with ClientSession(timeout=timeout) as session:
         async with session.post(
-            _API_URL, data=body, headers=headers, allow_redirects=False
+            _API_URL, data=body, headers=headers, allow_redirects=False, proxy=proxy
         ) as resp:
             return resp.status, await _shared.read_capped_response(
                 resp, sanitize._MAX_PAYLOAD_BYTES

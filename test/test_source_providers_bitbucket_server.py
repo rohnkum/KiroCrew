@@ -255,7 +255,9 @@ class _Instance:
             async def __aexit__(self, *exc: object) -> bool:
                 return False
 
-            def get(self, url: str, *, allow_redirects: bool = True) -> _Response:
+            def get(
+                self, url: str, *, allow_redirects: bool = True, proxy: str | None = None
+            ) -> _Response:
                 instance.requests.append(
                     {"url": url, "headers": dict(headers or {}), "redirects": allow_redirects}
                 )
