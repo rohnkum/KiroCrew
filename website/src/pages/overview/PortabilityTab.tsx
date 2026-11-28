@@ -372,11 +372,12 @@ export default function PortabilityTab() {
     setExportAppsWarning('')
     setExportChatsSkipped('')
     const withChats = includeChats && !memoryOnly
+    const withTemplates = includeTemplates && !memoryOnly
     try {
       const exportParams = new URLSearchParams()
       if (memoryOnly) exportParams.set('components', 'memory')
       if (withChats) exportParams.set('include_sessions', 'true')
-      if (includeTemplates && !memoryOnly) exportParams.set('include_agent_templates', 'true')
+      if (withTemplates) exportParams.set('include_agent_templates', 'true')
       const query = exportParams.toString()
       const exportUrl = query ? `/api/portability/export?${query}` : '/api/portability/export'
       const resp = await fetch(exportUrl)
@@ -393,10 +394,12 @@ export default function PortabilityTab() {
       setExportStatus({ type: 'ok', msg: i18nT('pages.overview.portabilityTab.download_started') })
       const { names, more } = unbundledTemplates(resp.headers.get('X-Kirocrew-Unbundled-Templates'))
       if (names.length || more) {
-        setExportWarning(i18nT('pages.overview.portabilityTab.export_templates_not_included', {
-          names: joinWithMore(names, more),
-          folder: agentsFolderHeader(resp.headers.get('X-Kirocrew-Agents-Folder')),
-        }))
+        const leftBehind = { names: joinWithMore(names, more), folder: agentsFolderHeader(resp.headers.get('X-Kirocrew-Agents-Folder')) }
+        // Without the box, every template the crews use stays behind and ticking it
+        // carries them; with it, only the ones the bundle could not carry are named.
+        setExportWarning(withTemplates
+          ? i18nT('pages.overview.portabilityTab.export_templates_not_included', leftBehind)
+          : i18nT('pages.overview.portabilityTab.export_templates_not_asked_for', leftBehind))
       }
       const apps = unbundledTemplates(resp.headers.get('X-Kirocrew-Unbundled-Apps'))
       if (apps.names.length || apps.more) setExportAppsWarning(i18nT('pages.overview.portabilityTab.export_apps_not_included', { names: joinWithMore(apps.names, apps.more) }))

@@ -18768,6 +18768,7 @@
         "workspace_files": "Fichiers de l'espace de travail :",
         "export_apps_not_included": "Cet export n'inclut pas ces applications ni leurs données : {{names}}. Sur l'autre machine, réinstalle-les ou réactive-les ; leurs données restent sur celle-ci.",
         "export_templates_not_included": "Cet export n'inclut pas les modèles d'agent utilisés par tes équipes : {{names}}. Copie-les depuis {{folder}} vers le dossier des agents de l'autre machine.",
+        "export_templates_not_asked_for": "Cet export n'inclut pas les modèles d'agent utilisés par tes équipes : {{names}}. Pour les emporter, active « Inclure les modèles d'agent » et exporte de nouveau, ou copie-les depuis {{folder}} vers le dossier des agents de l'autre machine.",
         "import_templates_missing": "Certaines équipes utilisent un modèle d'agent absent de cette machine (équipe → modèle) : {{crews}}. Copie les modèles manquants dans {{folder}} avant d'utiliser ces équipes.",
         "import_apps_missing": "Ces applications de l'autre machine ne sont pas configurées ici : {{names}}. Réinstalle-les ou active-les ; l'archive ne contient aucune donnée d'application.",
         "import_apps_unlisted": "Applications de l'autre machine que l'archive ne liste pas, donc non vérifiées ici : {{number}}.",

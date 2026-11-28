@@ -148,10 +148,33 @@ describe('PortabilityTab template warnings', () => {
     const warning = await screen.findByTestId('portability-export-warning')
     expect(warning.textContent).toContain('reviewer, writer, and 3 more')
     expect(warning.textContent).not.toContain('+3')
+    // Exported without the box, so the box comes first and copying by hand second.
+    expect(warning.textContent).toContain('To bring them, turn on “Include agent templates” and export again')
     // The folder the server reads, which KIRO_HOME can move from ~/.kiro/agents.
-    expect(warning.textContent).toContain('Copy them from /srv/kiro-home/agents to the agents folder on the other machine.')
+    expect(warning.textContent).toContain('or copy them from /srv/kiro-home/agents to the agents folder on the other machine.')
     expect(warning.textContent).not.toContain('~/.kiro/agents')
     expect(screen.getByText('Download started.')).toBeTruthy()
+  })
+
+  it('names only what a ticked export could not carry, and says to copy it by hand', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Blob(['PK']), {
+      status: 200,
+      headers: {
+        'X-Kirocrew-Unbundled-Templates': '["reviewer"]',
+        'X-Kirocrew-Agents-Folder': '"/srv/kiro-home/agents"',
+      },
+    })))
+    vi.stubGlobal('URL', class extends URL {
+      static createObjectURL = () => 'blob:x'
+      static revokeObjectURL = () => {}
+    })
+    render(<PortabilityTab />)
+    fireEvent.click(screen.getByRole('checkbox', { name: /include agent templates/i }))
+    fireEvent.click(screen.getByRole('button', { name: /download export/i }))
+    const warning = await screen.findByTestId('portability-export-warning')
+    expect(warning.textContent).toBe(
+      "This export doesn't include the agent templates your crews use: reviewer. Copy them from /srv/kiro-home/agents to the agents folder on the other machine.",
+    )
   })
 
   it('names the installed apps an export leaves out, beside the template line', async () => {

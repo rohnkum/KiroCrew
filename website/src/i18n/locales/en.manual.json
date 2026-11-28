@@ -8892,6 +8892,7 @@
         "mode": "Mode",
         "export_apps_not_included": "This export doesn't include these apps or their data: {{names}}. On the other machine, install them again or turn them back on; their data stays on this one.",
         "export_templates_not_included": "This export doesn't include the agent templates your crews use: {{names}}. Copy them from {{folder}} to the agents folder on the other machine.",
+        "export_templates_not_asked_for": "This export doesn't include the agent templates your crews use: {{names}}. To bring them, turn on “Include agent templates” and export again, or copy them from {{folder}} to the agents folder on the other machine.",
         "import_templates_missing": "Some crews use an agent template this machine doesn't have (crew → template): {{crews}}. Copy the missing templates into {{folder}} before you use these crews.",
         "import_apps_missing": "These apps from the other machine aren't set up here: {{names}}. Install them again or turn them on; the archive doesn't include any app data.",
         "import_apps_unlisted": "Apps from the other machine that the archive doesn't list, so they weren't checked here: {{number}}.",

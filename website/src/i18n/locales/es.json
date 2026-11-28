@@ -18768,6 +18768,7 @@
         "workspace_files": "Archivos del espacio de trabajo:",
         "export_apps_not_included": "Esta exportación no incluye estas apps ni sus datos: {{names}}. En la otra máquina, vuelve a instalarlas o enciéndelas de nuevo; sus datos se quedan en esta.",
         "export_templates_not_included": "Esta exportación no incluye las plantillas de agente que usan tus equipos: {{names}}. Cópialas de {{folder}} a la carpeta de agentes de la otra máquina.",
+        "export_templates_not_asked_for": "Esta exportación no incluye las plantillas de agente que usan tus equipos: {{names}}. Para llevarlas, activa “Incluir plantillas de agente” y vuelve a exportar, o cópialas de {{folder}} a la carpeta de agentes de la otra máquina.",
         "import_templates_missing": "Algunos equipos usan una plantilla de agente que no está en esta máquina (equipo → plantilla): {{crews}}. Copia las plantillas que faltan en {{folder}} antes de usar estos equipos.",
         "import_apps_missing": "Estas apps de la otra máquina no están configuradas aquí: {{names}}. Vuelve a instalarlas o enciéndelas; el archivo no incluye datos de apps.",
         "import_apps_unlisted": "Apps de la otra máquina que el archivo no enumera, por lo que no se comprobaron aquí: {{number}}.",
