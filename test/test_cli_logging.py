@@ -46,6 +46,7 @@ from kiro_crew.cli_logging import _fd_is_regular_file as _real_fd_is_regular_fil
 from kiro_crew.cli_logging import _rotate_boot_logs, _start_gateway_log_after_lock
 from kiro_crew.config import config_dir, loader_credentials, loader_pipeline
 from kiro_crew.dashboard import token_secret
+from kiro_crew.testing.wait import FALLBACK_TIMEOUT_SECS
 
 
 @pytest.fixture(autouse=True)
@@ -1126,18 +1127,25 @@ class TestGatewayConsoleEchoOffLoop:
         def _spy(timeout=None):
             # The file listener is already retired when the console's turn comes.
             calls.append((cli_mod._LOG_QUEUE_LISTENER is None, timeout))
+            # The file has drained; unstick the console so its stop does not wait on it.
+            self.console.release.set()
             real_stop(timeout)
 
+        # Above the stop's budget: a console handed its default, not the remainder, fails below.
+        _floor_monkeypatch.setattr(
+            "kiro_crew.cli._CONSOLE_DRAIN_TIMEOUT", 2 * FALLBACK_TIMEOUT_SECS, raising=False
+        )
         _setup_cli_logging("gateway", 1)
         _floor_monkeypatch.setattr("kiro_crew.cli._stop_console_queue_listener", _spy)
         log = logging.getLogger("kiro_crew.test_console")
         log.warning("stuck-record")
         assert self.console.entered.wait(10)
         log.warning("file-record")
-        _stop_log_queue_listener(0.2)
+        # The file's join rides on this budget: a slow runner's write must land inside it.
+        _stop_log_queue_listener(FALLBACK_TIMEOUT_SECS)
         ((file_first, budget),) = calls
         assert file_first
-        assert budget is not None and 0.0 <= budget <= 0.2
+        assert budget is not None and 0.0 <= budget <= FALLBACK_TIMEOUT_SECS
         text = (config_dir() / "gateway.log").read_text(encoding="utf-8")
         assert text.count("file-record") == 1
 
@@ -1580,7 +1588,7 @@ class TestQueueOffLoop:
         """The force-exit path (timeout=) must still flush a healthy queue."""
         _setup_cli_logging("gateway", 1)
         logging.getLogger("kiro_crew.bounded").warning("bounded-record")
-        _stop_log_queue_listener(timeout=5.0)
+        _stop_log_queue_listener(timeout=FALLBACK_TIMEOUT_SECS)
         text = (config_dir() / "gateway.log").read_text(encoding="utf-8")
         assert "bounded-record" in text
         assert cli_mod._LOG_QUEUE_LISTENER is None
@@ -1650,7 +1658,7 @@ class TestDrainBeforeHardExit:
         post-mortem actually needs - are on disk when the drain returns."""
         _setup_cli_logging("gateway", 1)
         logging.getLogger("kiro_crew.shutdown").warning("shutdown-tail-record")
-        await drain_log_queue_before_hard_exit()
+        await drain_log_queue_before_hard_exit(timeout=FALLBACK_TIMEOUT_SECS)
         text = (config_dir() / "gateway.log").read_text(encoding="utf-8")
         assert "shutdown-tail-record" in text
         assert cli_mod._LOG_QUEUE_LISTENER is None
