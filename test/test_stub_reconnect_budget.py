@@ -345,3 +345,41 @@ async def test_not_back_yet_log_carries_elapsed_and_remaining(monkeypatch, caplo
     # The first attempt happens at t=0 with the whole budget ahead of it.
     assert "elapsed=0s" in lines[0]
     assert f"remaining={stub_mod._RECONNECT_TOTAL_BUDGET_SECS:.0f}s" in lines[0]
+
+
+# --- a server switched off sharing is named as such --------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("reason", "withdrawn"),
+    [
+        ("no target mapping for server 'everything'; set KIROCREW_MCP_TARGET_<SERVER>", True),
+        ("isolation: this server must not be pooled", False),
+    ],
+)
+async def test_a_reconnect_refused_for_a_withdrawn_target_says_so(
+    monkeypatch, reason: str, withdrawn: bool
+) -> None:
+    """A gateway that answers "no target" is up and has stopped serving this
+    server (it was switched off sharing mid-call), so the terminal error must
+    not say "Gateway stopped responding": that is not true and names no remedy."""
+    _install_clock(monkeypatch)
+
+    async def _hs(_socket_path: str, _payload: dict):
+        return (
+            _reader_with(),
+            _CaptureWriter(),
+            "stub-uuid",
+            {"type": "registered", "capabilities": ["poolable_ack", "ensure_backend"]},
+        )
+
+    async def _refused(*_args, **_kwargs):
+        return stub_mod._ADMIT_REJECTED, {"type": "rejected", "class": "compat", "reason": reason}
+
+    monkeypatch.setattr(stub_mod, "handshake", _hs)
+    monkeypatch.setattr(stub_mod, "_ensure_backend_admitted", _refused)
+    session = _session_with_captured_init()
+
+    assert await _run_reconnect(session) is None
+    assert session.target_withdrawn is withdrawn

@@ -223,6 +223,22 @@ def _latest_turn_was_deliberately_stopped(messages: list[dict]) -> bool:
     return False
 
 
+def _latest_turn_shows_an_error(messages: list[dict]) -> bool:
+    """Whether the newest turn already ends in an error row the person can read.
+
+    The one shape that needs no restart row: the cut turn already says it
+    failed. An unanswered opener proves the interruption to the classifier but
+    shows the person nothing, so a chat cut after a tool call read as silent,
+    with no reply and no error.
+    """
+    for message in reversed(messages):
+        if message.get("role") == "error":
+            return True
+        if message.get("role") in ("user", "assistant", "nudge", "subagent", "inject", "tool"):
+            return False
+    return False
+
+
 def _latest_turn_settled_by_refused_model(messages: list[dict]) -> bool:
     """Whether the newest turn ends in the card a refused model's spent ladder leaves.
 
@@ -267,11 +283,12 @@ def _reconcile_local_turn_marker(
     window bound into the frozen prefix, and a check against the window alone
     would append a duplicate that the next save then writes for good. Callers
     that hold only the window pass nothing and the window is searched. Only
-    then is the tail judged: when the transcript already proves the
-    interruption (an unanswered user row, a trailing error) no second row is
-    needed; when the newest turn ends in the user's own Stop card, that intent
-    wins. Otherwise one ``error`` row lands at the tail so the classifier,
-    composer and sidebar agree.
+    then is the tail judged: when the newest turn already ends in an error row
+    no second row is needed; when it ends in the user's own Stop card, that
+    intent wins. Otherwise one ``error`` row lands at the tail so the
+    classifier, composer and sidebar agree. An unanswered opener gets the row
+    too: it proves the interruption to the classifier, but a person reading
+    the chat saw no reply and no error.
 
     Every window save rewrites the window from its first row, so a lost
     opener implies every row after it is lost too and the tail is where it
@@ -306,7 +323,7 @@ def _reconcile_local_turn_marker(
             meta=dict(prompt_meta) if isinstance(prompt_meta, dict) and prompt_meta else None,
         )
     if (
-        not is_turn_interrupted(slot.messages)
+        not _latest_turn_shows_an_error(slot.messages)
         and not _latest_turn_was_deliberately_stopped(slot.messages)
         and not _latest_turn_settled_by_refused_model(slot.messages)
     ):

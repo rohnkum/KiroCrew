@@ -132,7 +132,17 @@ def maybe_spill_response(
         request_id = re.sub(r"[^a-zA-Z0-9_\-]", "_", str(msg_id))[:64]
         timestamp = int(time.time())
         safe_server = _sanitize_server_name(server_name)
-        filename = f"{safe_server}-{request_id}-{timestamp}.json"
+        # Plain text, one text item after another, so the agent pages through it
+        # with its file read tool by line range. The JSON-RPC line was a single
+        # line, which only a shell can slice, and on Windows each of those shell
+        # reads asked for approval.
+        filename = f"{safe_server}-{request_id}-{timestamp}.txt"
+        full_text = "\n\n".join(
+            item["text"]
+            for item in content_list
+            if isinstance(item, dict) and item.get("type") == "text" and isinstance(item.get("text"), str)
+        )
+        spilled = full_text.encode("utf-8", "surrogatepass")
 
         spill_dir = _spill_dir()
         # Never operate through a linked spill dir (agent-swappable): an
@@ -158,13 +168,13 @@ def maybe_spill_response(
             open_flags |= os.O_NOFOLLOW
         fd = os.open(str(spill_path), open_flags, 0o600)
         try:
-            os.write(fd, line)
+            os.write(fd, spilled)
         finally:
             os.close(fd)
         abs_path = str(spill_path.resolve())
 
         # Truncate each text item's content to first 16 KiB + marker
-        total_bytes = len(line)
+        total_bytes = len(spilled)
         rewritten_content = []
         for item in content_list:
             if isinstance(item, dict) and item.get("type") == "text" and "text" in item:
@@ -173,7 +183,8 @@ def maybe_spill_response(
                     truncated = text.encode("utf-8")[:_INLINE_PREFIX_BYTES].decode("utf-8", errors="ignore")
                     marker = (
                         f"\n\n[KiroCrew: response truncated -- full {total_bytes} bytes "
-                        f"at {abs_path}. Read with bash: head/grep/jq.]"
+                        f"at {abs_path}, as plain text. Read a range of lines with "
+                        "your file read tool; do not load it whole.]"
                     )
                     rewritten_content.append({**item, "text": truncated + marker})
                 else:

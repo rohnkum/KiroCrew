@@ -22,7 +22,7 @@ respawn replay restores routing on its grant, carries the caller on an identity-
 is skipped there without one; retracted subscribe ids are answered; a subscribe past the per-stub
 cap is refused locally, a malformed subscribe records nothing and a malformed update is dropped. A
 server-to-client request routes by ``relatedRequestId`` or to the single attached stub, and one that
-cannot be attributed recycles the backend. A topic of the ``test_mcp_gateway_backend_coverage``
+cannot be attributed is refused to the server. A topic of the ``test_mcp_gateway_backend_coverage``
 family: ``test_mcp_gateway_backend_coverage.py`` keeps ``forward_from_stub``, the initialize state
 machine and notification ownership, the other siblings are
 ``test_mcp_gateway_backend_coverage_call_metrics_logging.py``,
@@ -40,6 +40,7 @@ import asyncio
 import json
 import time
 from typing import Any
+from unittest.mock import ANY
 
 import pytest
 from mcp_gateway_backend_coverage_helpers import _no_real_metrics_file  # noqa: F401 -- autouse
@@ -1517,13 +1518,60 @@ class TestRouteBackendLine:
         assert (await _drain(inbox))["id"] == "srv-1"
 
     @pytest.mark.asyncio
-    async def test_unattributable_server_request_recycles_backend(self) -> None:
+    async def test_unattributable_server_request_is_refused_and_keeps_calls_alive(self) -> None:
+        """No chat gets the request, the server is answered at once, and the
+        co-tenants' in-flight calls keep running: killing the backend failed
+        them all and left the server waiting on a request nobody answered."""
+        backend = _make_backend()
+        inbox1 = await backend.attach_stub("s1")
+        inbox2 = await backend.attach_stub("s2")
+        backend._pending_requests["gw-1"] = _PendingRequest(
+            stub_uuid="s1", original_id=7, method="tools/call"
+        )
+        await backend._route_backend_line(_line({"id": "srv-1", "method": "elicitation/create"}))
+        assert backend._gone_broadcast is False
+        assert backend.dead_reason is None
+        assert "gw-1" in backend._pending_requests
+        assert inbox1.empty() and inbox2.empty()
+        assert _frames(backend)[-1] == {
+            "jsonrpc": "2.0",
+            "id": "srv-1",
+            "error": {"code": -32601, "message": ANY},
+        }
+        assert "cannot route without a cross-tenant leak" in backend.unshareable_reason
+
+    @pytest.mark.asyncio
+    async def test_every_settlement_entry_holds_the_backend_settling(self) -> None:
+        """A real response and a synthetic failure both settle with the backend
+        marked settling, so no session leaves it while a lease rider's answer
+        is still being written; the mark clears afterwards."""
         backend = _make_backend()
         await backend.attach_stub("s1")
-        await backend.attach_stub("s2")
-        await backend._route_backend_line(_line({"id": "srv-1", "method": "elicitation/create"}))
-        assert "cannot route without a cross-tenant leak" in (backend.dead_reason or "")
-        assert backend._gone_broadcast is True
+        seen: list[int] = []
+
+        async def _record(*_args: Any, **_kwargs: Any) -> None:
+            seen.append(backend._settling)
+
+        backend._settle = _record  # type: ignore[method-assign]
+        backend._pending_requests["gw-1"] = _PendingRequest(
+            stub_uuid="s1", original_id=7, method="resources/subscribe"
+        )
+        await backend._route_backend_line(_line({"id": "gw-1", "result": {}}))
+        pending = _PendingRequest(stub_uuid="s1", original_id=8, method="resources/subscribe")
+        await backend._fail_claimed_request(pending, "gw-2", "response too large")
+
+        assert seen == [1, 1]
+        assert backend._settling == 0
+
+    @pytest.mark.asyncio
+    async def test_unattributable_request_with_no_stub_is_refused_not_marked(self) -> None:
+        """A request that arrives before any stub attached (during a respawn's
+        handshake) is refused and does not mark the backend: nobody shares it."""
+        backend = _make_backend()
+        await backend._route_backend_line(_line({"id": "srv-2", "method": "roots/list"}))
+        assert backend._gone_broadcast is False
+        assert _frames(backend)[-1]["id"] == "srv-2"
+        assert backend.unshareable_reason == ""
 
     @pytest.mark.asyncio
     async def test_frame_with_neither_id_nor_method_dropped(self) -> None:

@@ -170,6 +170,7 @@ from kiro_crew.mcp_gateway.daemon.connection import (  # noqa: F401
     _handle_connection,
     _is_era_probe,
     _method_not_found,
+    _should_leave_unshareable,
     _teardown_connection,
     _warn_no_declared_env,
 )
@@ -332,6 +333,7 @@ from kiro_crew.mcp_gateway.daemon.wire import (  # noqa: F401
     _WRITE_REPLY_TIMEOUT_SECS,
     STUB_KEEPALIVE_TYPE,
     _drain_inbox_to_stub,
+    _finish_write,
     _is_ping_frame,
     _jsonrpc_error,
     _jsonrpc_parse_error,

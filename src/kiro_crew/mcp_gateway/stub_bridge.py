@@ -193,6 +193,10 @@ class StubSession:
         self.init_result: Optional[dict] = None
         #: Successful reconnects so far, for logging and the audit record.
         self.reconnects: int = 0
+        #: Set when a reconnect reached a gateway that has stopped serving this
+        #: server (it was switched off sharing): the gateway answered, so the
+        #: terminal error must not say it stopped responding.
+        self.target_withdrawn: bool = False
         self._subscribed: bool = False
         self._line_q: Optional["asyncio.Queue[bytes]"] = None
         #: Lines already taken off the queue that no pump has forwarded yet.

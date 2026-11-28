@@ -2569,10 +2569,12 @@ no longer destroy older turns.
   empty-window merge, which cannot delete a key, writes the cleared values (`0`
   and `null`). Every restore path calls
   `_reconcile_local_turn_marker` once its window is loaded: a copy with no row of
-  its identity anywhere on disk is re-appended, and unless the tail already shows
-  the interruption or ends in the user's own Stop card, one `error` row
+  its identity anywhere on disk is re-appended, and unless the newest turn already
+  ends in an error row or in the user's own Stop card, one `error` row
   (`meta.kind = "gateway_restart_interruption"`) lands past the window boundary
-  so the next save writes it. A second restart before that save re-decides from
+  so the next save writes it. An unanswered opener gets the row too: it proves
+  the interruption to `is_turn_interrupted`, but a chat cut after a tool call
+  showed the person no reply and no error. A second restart before that save re-decides from
   the same bytes, so rows do not accumulate. A turn's exit clears the marker,
   except when the gateway is going away (a signal shutdown, or the `close_all()`
   final drain of an in-app restart) and the turn has not landed: that marker is

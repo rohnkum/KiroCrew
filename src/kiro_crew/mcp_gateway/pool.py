@@ -780,6 +780,7 @@ class BackendPool:
             return (
                 backend.is_alive
                 and not backend.quarantined
+                and not backend.unshareable_reason
                 and (reusable is None or reusable(backend))
             )
 

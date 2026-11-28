@@ -98,6 +98,80 @@ def test_ensure_agent_materialized_rebuilds_once_a_dropped_program_is_found(tmp_
     rebuild.assert_called_once()
 
 
+@pytest.mark.parametrize("damaged", [b'{ "this is": corrupt', b"[]", b"\xff\xfe{"])
+def test_ensure_agent_materialized_rebuilds_a_damaged_spec_and_keeps_a_copy(
+    tmp_path, monkeypatch, damaged
+):
+    """A main spec that is present but does not parse failed every session
+    start ("is not a valid spec") until something else rebuilt it. The start
+    now rebuilds it, after keeping the damaged bytes beside it."""
+    import kiro_crew.agent as agent_mod
+
+    monkeypatch.setattr(agent_mod, "kiro_agents_dir_path", lambda: tmp_path)
+    spec = tmp_path / agent_mod.AGENT_FILENAME
+    spec.write_bytes(damaged)
+
+    def _fake_rebuild(*_a, **_k):
+        spec.write_text("{}", encoding="utf-8")
+        return spec
+
+    rebuild = unittest.mock.MagicMock(side_effect=_fake_rebuild)
+    monkeypatch.setattr(agent_mod, "rebuild_agent_config", rebuild)
+    managed = Path(agent_mod.AGENT_FILENAME).stem
+
+    assert agent_mod.ensure_agent_materialized(managed) is True
+    rebuild.assert_called_once()
+    kept = tmp_path / (agent_mod.AGENT_FILENAME + ".damaged")
+    assert kept.read_bytes() == damaged
+    if os.name != "nt":
+        # A damaged spec can still hold a client secret: owner-only, like the spec.
+        assert kept.stat().st_mode & 0o777 == 0o600
+    assert agent_mod.ensure_agent_materialized(managed) is True
+    rebuild.assert_called_once()
+
+
+def test_ensure_agent_materialized_leaves_an_unreadable_spec_alone(tmp_path, monkeypatch):
+    """A spec that cannot be read (a permission, a Windows lock) holds unknown
+    contents, so nothing is copied or rebuilt over it."""
+    import kiro_crew.agent as agent_mod
+
+    monkeypatch.setattr(agent_mod, "kiro_agents_dir_path", lambda: tmp_path)
+    (tmp_path / agent_mod.AGENT_FILENAME).write_text("{}", encoding="utf-8")
+
+    from kiro_crew import hooks
+
+    def _locked(_path):
+        raise PermissionError("[WinError 32] used by another process")
+
+    monkeypatch.setattr(hooks, "safe_read_file_bytes", _locked)
+    rebuild = unittest.mock.MagicMock()
+    monkeypatch.setattr(agent_mod, "rebuild_agent_config", rebuild)
+    managed = Path(agent_mod.AGENT_FILENAME).stem
+
+    assert agent_mod.ensure_agent_materialized(managed) is True
+    rebuild.assert_not_called()
+    assert not (tmp_path / (agent_mod.AGENT_FILENAME + ".damaged")).exists()
+
+
+@requires_symlinks
+def test_a_damaged_spec_that_is_a_symlink_is_never_copied_out(tmp_path, monkeypatch):
+    """A ``kirocrew.json`` linked to another file is not copied to
+    ``.damaged``: that would put a file the agent may not read where it can."""
+    import kiro_crew.agent as agent_mod
+
+    agents = tmp_path / "agents"
+    agents.mkdir()
+    secret = tmp_path / "secret.txt"
+    secret.write_text("not json, a credential", encoding="utf-8")
+    monkeypatch.setattr(agent_mod, "kiro_agents_dir_path", lambda: agents)
+    (agents / agent_mod.AGENT_FILENAME).symlink_to(secret)
+    monkeypatch.setattr(agent_mod, "rebuild_agent_config", unittest.mock.MagicMock())
+
+    agent_mod.ensure_agent_materialized(Path(agent_mod.AGENT_FILENAME).stem)
+
+    assert not (agents / (agent_mod.AGENT_FILENAME + ".damaged")).exists()
+
+
 def test_ensure_agent_materialized_swallows_errors(tmp_path, monkeypatch):
     """Best-effort: a rebuild failure never propagates (it sits on the spawn
     hot path) — returns False instead."""

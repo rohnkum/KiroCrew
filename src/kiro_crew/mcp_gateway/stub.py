@@ -865,9 +865,15 @@ async def _amain(argv: Optional[list[str]] = None) -> int:
         session.outstanding_ids = []
         await _emit_error_frames(
             _abandoned,
-            "Gateway stopped responding and could not be reached again; this "
-            "call was failed so it would not hang. Start a new session to "
-            "restore these tools.",
+            (
+                "This MCP server stopped being shared while this call ran, so "
+                "the call was stopped. Start a new session to use the server "
+                "again; it then runs in that session."
+                if session.target_withdrawn
+                else "Gateway stopped responding and could not be reached again; "
+                "this call was failed so it would not hang. Start a new session "
+                "to restore these tools."
+            ),
             pool_label=pool_label,
         )
         await alog_fallback(

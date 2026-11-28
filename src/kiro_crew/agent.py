@@ -222,6 +222,7 @@ from kiro_crew.agent_parts.spec_rebuild import (
     _rebuild_answer_generation,
     _rebuild_incomplete,
     _reproject_holding_the_lock,
+    _set_aside_damaged_main_spec,
     _spec_unresolvable_refusal,
     _stem_claimant_fork,
     _tracks_rebuild_outcome,

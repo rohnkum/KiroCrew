@@ -341,6 +341,13 @@ class Backend:
     start_id: Optional[str] = None
     # Quarantine: no new stubs may attach; kill when refcount drains to 0.
     quarantined: bool = False
+    # Why this shared backend must not stay shared (an unroutable server
+    # request). Each attached connection moves to a private backend on its
+    # next request once it has nothing in flight here.
+    unshareable_reason: str = ""
+    # Responses that left ``_pending_requests`` and are still being settled
+    # (``backend_routing``): answers owed that no table holds, to any stub.
+    _settling: int = 0
     # Ping-gated wedge detection: updated each time the heartbeat ping response
     # is swallowed in _route_backend_line. Initialized to creation time so a
     # cold-start backend isn't immediately considered stale.
@@ -552,6 +559,7 @@ class Backend:
     _settle = _backend_routing._settle
     _route_backend_message = _backend_routing._route_backend_message
     _record_hazard = _backend_routing._record_hazard
+    _reply_to_server_request = _backend_routing._reply_to_server_request
     _apply_inflight_report = _backend_routing._apply_inflight_report
     _notification_owner = _backend_routing._notification_owner
     _spawn_metric_task = _backend_routing._spawn_metric_task

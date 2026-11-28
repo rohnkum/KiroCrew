@@ -971,12 +971,14 @@ def test_settle_turns_a_turn_marker_into_the_interruption_row(tmp_path, monkeypa
     assert applied.turn_generation == 3 and bare._turn_in_flight_generation == 0
     assert [m["role"] for m in bare.messages] == ["error"]
     assert bare.messages[-1]["meta"]["kind"] == "gateway_restart_interruption"
-    # A lost opener comes back first, and the unanswered opener is itself the
-    # interruption, so no second row lands.
+    # A lost opener comes back first, then the row that tells the person the
+    # turn was cut: an unanswered opener alone shows them nothing.
     meta = {"turn_in_flight_generation": 3, "turn_in_flight_prompt": copy.deepcopy(PROMPT)}
     opened, applied, _ = _read_back(state, meta, codec.RESTORE, name="o")
     assert applied.settle([]) is True
-    assert [(m["role"], m["content"]) for m in opened.messages] == [("user", "the opener")]
+    assert [m["role"] for m in opened.messages] == ["user", "error"]
+    assert opened.messages[0]["content"] == "the opener"
+    assert opened.messages[-1]["meta"]["kind"] == "gateway_restart_interruption"
     quiet, applied, _ = _read_back(state, {}, codec.RECENT, name="q")
     assert applied.settle([]) is False and quiet.messages == []
 

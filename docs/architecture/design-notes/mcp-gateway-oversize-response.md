@@ -63,9 +63,9 @@ For responses that fit within the read limit but exceed the spill threshold:
 2. Check if it's a `tools/call` result whose `result.content` list has a `text` item over 16 KiB (the one
    thing step 4 cuts). A result whose bulk is an image beside short text is forwarded whole and leaves
    no sidecar.
-3. Write the **full original response** to `<data home>/mcp_spill/<server>-<request_id>-<timestamp>.json` (`KIROCREW_HOME`, default `~/.kiro/crew`).
+3. Write the **full text** of the result's text items, as plain UTF-8 separated by a blank line, to `<data home>/mcp_spill/<server>-<request_id>-<timestamp>.txt` (`KIROCREW_HOME`, default `~/.kiro/crew`). Plain text keeps the result's own lines, so the agent pages through it with its file read tool. The JSON-RPC line it once held was a single line only a shell could slice, and on Windows every such shell read raised an approval card.
 4. Truncate each text item to the first 16 KiB.
-5. Append a marker: `[KiroCrew: response truncated -- full <N> bytes at <path>. Read with bash: head/grep/jq.]`
+5. Append a marker: `[KiroCrew: response truncated -- full <N> bytes at <path>, as plain text. Read a range of lines with your file read tool; do not load it whole.]`
 6. Forward the rewritten (smaller) response.
 
 Non-tool-result frames, errors, and small responses are **never** spilled.
@@ -145,14 +145,14 @@ no brokered path renders resource blobs to the model today.
 ### Spill file format
 
 - **Directory:** `<data home>/mcp_spill/` (mode 0700; `KIROCREW_HOME`, default `~/.kiro/crew`)
-- **Filename:** `<server>-<request_id>-<timestamp>.json`
-- **Content:** Complete original JSON-RPC response line
+- **Filename:** `<server>-<request_id>-<timestamp>.txt`
+- **Content:** The full text of the result's text items, plain UTF-8
 - **Cleanup:** Files older than 24h are deleted on gatewayd startup
 
 ### Inline marker format
 
 ```
-[KiroCrew: response truncated -- full 1482937 bytes at /home/user/.kiro/crew/mcp_spill/example-mcp-gw-12345-7-1721200000.json. Read with bash: head/grep/jq.]
+[KiroCrew: response truncated -- full 1482937 bytes at /home/user/.kiro/crew/mcp_spill/example-mcp-gw-12345-7-1721200000.txt, as plain text. Read a range of lines with your file read tool; do not load it whole.]
 ```
 
 ## Troubleshooting

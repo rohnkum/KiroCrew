@@ -1055,6 +1055,9 @@ async def _reconnect(
                     # rejection): the target, not the moment. ``initialize`` is
                     # long consumed, so the cold-start exec is not available;
                     # refuse this generation.
+                    session.target_withdrawn = TARGET_UNKNOWN_REASON in str(
+                        (verdict or {}).get("reason") or ""
+                    )
                     logger.warning(
                         "stub reconnect: gateway rejected ensure_backend (%s: %s); "
                         "refusing pool=%s",

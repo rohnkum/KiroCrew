@@ -199,10 +199,11 @@ async def _respawn_backend_for_stub_unrecorded(
     in the spawn gate up to the daemon's queue budget, during which the caller
     keeps answering the stub's bridge pings.
 
-    Never re-forwards the in-flight request itself: a ``tools/call`` may have
-    executed on the old backend before it died, so replaying it could
-    double-execute a non-idempotent tool. The caller fails just that one
-    request with a retryable error instead.
+    Never re-forwards the in-flight request itself. The caller sends it to the
+    replacement only when the old backend is known never to have received it
+    (a precheck, or a backend already dead when the forward started); a write
+    that failed may have run a non-idempotent ``tools/call`` there, so that
+    request gets a retryable error instead.
     """
     # Stop the old inbox drain first so it cannot race the new writer task
     # onto the same socket, then flush whatever the dying backend already

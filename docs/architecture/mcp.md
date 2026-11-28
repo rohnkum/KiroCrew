@@ -2083,7 +2083,10 @@ daemon's environment from spawn (`daemon.launch.env_target_resolver`) and the
 overlays are written with it. The gateway keeps running. Chats attached to the old
 daemon get their in-flight routed calls failed with a retryable error after
 `DRAIN_SECS`. Stubs for retained targets reconnect (`stub.py`) unless they have
-requested resource subscriptions, which the new daemon cannot recover. Every
+requested resource subscriptions, which the new daemon cannot recover. A stub for
+a removed target reaches the new daemon, is told it has no target for the server,
+and fails its outstanding calls saying the server stopped being shared
+(`StubSession.target_withdrawn`), not that the gateway stopped responding. Every
 broker restart resets open chats through `reset_sessions`, including additions
 and approved launches; removing a served target also resets them. Busy chats
 reset when their turn ends (`defer_busy=True`, `keep_busy=True`), and the response

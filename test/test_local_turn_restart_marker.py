@@ -677,6 +677,26 @@ def test_a_second_restart_before_the_save_does_not_duplicate_the_row(tmp_path):
         assert len(_restart_rows(restored.messages)) == 1
 
 
+def test_a_turn_cut_after_a_tool_call_tells_the_person(tmp_path):
+    """A restart that cut a turn after its tool call, before any reply, left
+    ``user -> tool``: the classifier read it as interrupted, so no row was
+    added, and the person saw no reply and no error."""
+    state = _make_state(tmp_path)
+    slot = state.get_or_create_slot("chat-1")
+    slot.append("user", "run the long operation", "msg msg-u")
+    slot.append("tool", "trigger-long-running-operation", "tool", meta={"done": False})
+    slot._turn_in_flight_generation = 21
+    assert _save_slot_to_history(state, slot, force=True)
+
+    del state._slots["chat-1"]
+    restored = _rehydrate_slot_from_history(state, "chat-1")
+
+    assert restored is not None
+    assert restored.to_dict()["interrupted"] is True
+    assert len(_restart_rows(restored.messages)) == 1
+    assert restored.messages[-1]["meta"]["kind"] == _RESTART_KIND
+
+
 def test_existing_interruption_evidence_does_not_gain_a_duplicate_error(tmp_path):
     state = _make_state(tmp_path)
     slot = state.get_or_create_slot("chat-1")
@@ -1131,18 +1151,18 @@ def test_a_lost_opening_row_is_restored_before_the_tail_is_judged(tmp_path):
 
     assert restored is not None
     # RED before the copy: the Stop tail read as deliberate, no row, no flag.
-    tail = restored.messages[-1]
+    tail = restored.messages[-2]
     assert tail["role"] == "user"
     assert tail["content"] == "second prompt, never flushed"
     assert tail["ts"] == lost["ts"]
     assert tail["meta"]["mid"] == lost["meta"]["mid"]
     assert restored.to_dict()["interrupted"] is True
-    # The unanswered prompt is the interruption evidence; no second row.
-    assert _restart_rows(restored.messages) == []
+    # The unanswered prompt proves the interruption, and the row says so.
+    assert len(_restart_rows(restored.messages)) == 1
     assert restored._turn_in_flight_generation == 0
     assert restored._turn_in_flight_prompt is None
     assert restored._dirty is True
-    assert restored._disk_window_len == len(restored.messages) - 1
+    assert restored._disk_window_len == len(restored.messages) - 2
 
     # The restored row is written by the next save and survives another restart.
     assert _save_slot_to_history(state, restored, force=True)
@@ -1341,7 +1361,7 @@ def test_a_restored_copy_carries_only_identity_and_attachments(tmp_path):
     restored = _rehydrate_slot_from_history(state, "chat-1")
 
     assert restored is not None
-    tail = restored.messages[-1]
+    tail = restored.messages[-2]
     assert tail["role"] == "user" and tail["content"] == "lost prompt"
     # A planted ``cls`` is not read; the loader's default is assigned.
     assert tail["cls"] == "msg msg-u"
@@ -1556,9 +1576,10 @@ async def test_a_restricted_session_killed_mid_turn_restores_resume(tmp_path, mo
 
     assert restored is not None
     assert restored.memory_mode == mode
-    # The restored opener is itself the unanswered tail, so no extra error row.
-    assert [m["role"] for m in restored.messages] == ["user", "assistant", "user"]
-    assert restored.messages[-1]["content"] == "a private prompt"
+    # The restored opener, then the restart row that tells the person why.
+    assert [m["role"] for m in restored.messages] == ["user", "assistant", "user", "error"]
+    assert restored.messages[-2]["content"] == "a private prompt"
+    assert restored.messages[-1]["meta"]["kind"] == _RESTART_KIND
     assert restored.to_dict()["interrupted"] is True
 
 

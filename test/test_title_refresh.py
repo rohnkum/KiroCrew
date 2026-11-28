@@ -786,7 +786,8 @@ class TestRehydratedMarkRebase:
         slot = await _rehydrate(state, driver)
         restored = sum(1 for m in slot.messages if m.get("role") == "user")
         assert restored == 248
-        assert slot.messages[-1]["content"] == "turn 300"
+        # The restored opener, then the restart row that follows it.
+        assert slot.messages[-2]["content"] == "turn 300"
         assert slot._title_refresh_mark == 248
 
         calls = _patch_generator(monkeypatch, "KEEP-unused")

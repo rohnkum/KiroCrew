@@ -1507,14 +1507,12 @@ class TestAnAttachedConnectionAcrossAPortChange:
         (handed,) = respawn.calls
         assert handed[6] is stale, "the respawn replaces the backend the connection held"
         assert handed[5]["method"] == "initialize", "and re-primes from the captured handshake"
-        ((_uuid, after, *_rest),) = [c.args for c in fresh.forward_from_stub.await_args_list]
-        assert after["id"] == 2
+        # The frame the old backend never received is sent to the replacement,
+        # not answered with a retry error, and the next one follows it there.
+        after = [c.args[1]["id"] for c in fresh.forward_from_stub.await_args_list]
+        assert after == [1, 2]
         frames = writer.frames()
-        assert [f.get("type") for f in frames[:2]] == ["registered", "ready"]
-        (retry,) = frames[2:]
-        assert retry["id"] == 1
-        assert "backend restarted mid-call, retry" in retry["error"]["message"]
-        assert f"owner port {OWNER_PORT}" in retry["error"]["message"]
+        assert [f.get("type") for f in frames] == ["registered", "ready"]
 
     @pytest.mark.asyncio
     async def test_a_third_party_backend_keeps_forwarding(

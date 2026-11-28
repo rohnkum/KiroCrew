@@ -162,10 +162,12 @@ async def _drain_inbox_to_stub(
         while True:
             payload = await inbox.get()
             guard: Any = lock if lock is not None else contextlib.nullcontext()
+            written = False
             try:
                 with facade._counted_stub_write():
                     async with guard:
                         writer.write(payload)
+                        written = True
                         await asyncio.wait_for(
                             writer.drain(), timeout=facade._WRITE_REPLY_TIMEOUT_SECS
                         )
@@ -183,8 +185,29 @@ async def _drain_inbox_to_stub(
                 # Stub passed the handshake but stopped reading; don't pin this
                 # writer task (and its connection handler + fd) indefinitely.
                 return
+            except asyncio.CancelledError:
+                if not written:
+                    # Cancelled while waiting for the socket's write lock (a
+                    # keepalive holds it): the payload is already off the inbox,
+                    # so it is written here, bounded, before the cancel goes on.
+                    # A respawn awaits this task before its own flush, so the
+                    # order holds; putting it back could overflow a full inbox.
+                    await _finish_write(writer, guard, payload)
+                raise
     except asyncio.CancelledError:
         raise
+
+
+async def _finish_write(writer: asyncio.StreamWriter, guard: Any, payload: bytes) -> None:
+    """Write one payload a cancelled drain already took; drop it if that fails."""
+
+    async def _write() -> None:
+        async with guard:
+            writer.write(payload)
+            await writer.drain()
+
+    with contextlib.suppress(Exception):
+        await asyncio.wait_for(_write(), timeout=facade._WRITE_REPLY_TIMEOUT_SECS)
 
 
 # --- Stub-connection liveness probe -----------------------------------------

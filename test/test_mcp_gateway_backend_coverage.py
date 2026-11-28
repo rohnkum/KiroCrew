@@ -15,7 +15,7 @@ direct test:
   (EOF, mid-line truncation, oversize-line drain, spill hook).
 * ``_route_backend_line`` routing/attribution: heartbeat pongs, unknown ids,
   notification ownership, global broadcast, deny-by-default drop, and the
-  server->client request recycle.
+  server->client request refusal.
 * Terminal/teardown paths: ``_broadcast_backend_gone``, ``_enqueue_to_stub``
   overflow, ``cancel_in_flight_for_stub``, ``recycle_if_idle``, ``shutdown``.
 * ``spawn_backend`` / ``send_initialize`` with the subprocess seam stubbed, and

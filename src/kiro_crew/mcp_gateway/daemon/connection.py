@@ -133,6 +133,37 @@ def _method_not_found(msg: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _should_leave_unshareable(backend: Any, stub_uuid: str, msg: Any) -> bool:
+    """Whether this request should move its session off a backend marked
+    unshareable. Waits while the old backend still owes this session an
+    answer (a call in flight, an MCP Apps delivery, a subscribe parked on a
+    lease): leaving detaches the stub, and that answer would reach no one."""
+    if not getattr(backend, "unshareable_reason", "") or backend.exclusive_token:
+        return False
+    if not isinstance(msg, dict) or "method" not in msg or msg.get("id") is None:
+        return False
+    # An MCP Apps interception still running holds a tool result it has taken
+    # off the pending table; it is not tracked per stub, so any one waits.
+    if any(not task.done() for task in backend._apps_tasks):
+        return False
+    if any(p.stub_uuid == stub_uuid for p in backend._pending_requests.values()):
+        return False
+    # A settlement in progress may still answer this stub (a lease rider);
+    # it is not tracked per stub, so any one waits.
+    if backend._settling:
+        return False
+    # A subscribe or unsubscribe parked locally on a lease is answered only by
+    # this backend's verdict; detaching drops it unanswered.
+    parked = (
+        backend._lease_pending_riders,
+        backend._lease_release_waiters,
+        backend._lease_replacement_subscribes,
+    )
+    return not any(
+        owner == stub_uuid for table in parked for waiters in table.values() for owner, _ in waiters
+    )
+
+
 def _warn_no_declared_env(server_name: str) -> None:
     """Warn that a routed server's private stub starts with no declared env.
 
@@ -817,6 +848,11 @@ async def _handle_connection(
             # agent-less backend). The replacement is primed from it, so its
             # cached handshake -- not a retry error -- is what this frame returns.
             agent_rebind_initialize = False
+            # Whether a BackendGone below is known to have come before this frame
+            # reached the backend: a precheck here, or a backend already dead
+            # when the forward starts (``forward_from_stub`` refuses it first).
+            # A write that failed may still have delivered the call.
+            unsent = True
             try:
                 if restart_for_agent:
                     restart_for_agent = False
@@ -834,12 +870,18 @@ async def _handle_connection(
                         f"bound to owner port {backend.owner_port}, "
                         f"which is now {facade._OWNER_PORT}"
                     )
+                if _should_leave_unshareable(backend, stub_uuid, msg):
+                    # The server sent a request no single chat owns. This
+                    # session moves to a private backend between calls, so no
+                    # call in flight is lost; the request is replayed there.
+                    raise BackendGone(backend.unshareable_reason)
                 # ``caller`` itself stays tokenless for the life of the
                 # connection: the token is attached to a per-forward copy,
                 # decided against the backend that receives THIS frame. A
                 # respawn hands the tokenless base on and re-decides for the
                 # replacement.
                 forward_caller = _caller_for_backend(backend, caller, conn)
+                unsent = not getattr(backend, "is_alive", True)
                 await backend.forward_from_stub(
                     stub_uuid, msg, caller=forward_caller, tenant_nonce=conn.tenant_nonce
                 )
@@ -902,14 +944,33 @@ async def _handle_connection(
                         stub_uuid, msg, caller=forward_caller, tenant_nonce=conn.tenant_nonce
                     )
                     continue
-                # Fail only this in-flight request; kiro-cli retries it on the
-                # now-healthy transport. A duplicate error for this id from the
-                # dying backend's broadcast is harmless — clients dedupe by id.
-                if isinstance(msg, dict) and "method" in msg and msg.get("id") is not None:
+                # A request the old backend is known never to have received is
+                # sent to the replacement, so it runs exactly once: not every
+                # client retries an error reply (KAS shows it to the model). One
+                # whose write failed may have run there already, so it gets the
+                # retryable error, as does one whose replacement dies too. So
+                # does a ``ping``: it asks whether the backend it was talking to
+                # is still there, and that answer is no (the resource holder
+                # reports its gap from it).
+                is_request = isinstance(msg, dict) and "method" in msg and msg.get("id") is not None
+                if is_request and (not unsent or msg.get("method") == "ping"):
                     await _write_json_line(
                         writer,
                         _jsonrpc_error(msg, f"backend restarted mid-call, retry: {exc}"),
                     )
+                elif is_request:
+                    try:
+                        await replacement.forward_from_stub(
+                            stub_uuid,
+                            msg,
+                            caller=_caller_for_backend(replacement, caller, conn),
+                            tenant_nonce=conn.tenant_nonce,
+                        )
+                    except BackendGone as again:
+                        await _write_json_line(
+                            writer,
+                            _jsonrpc_error(msg, f"backend restarted mid-call, retry: {again}"),
+                        )
                 continue
             except Exception as exc:  # pragma: no cover — defensive
                 logger.exception("forward_from_stub failed for %s", stub_uuid)

@@ -1246,6 +1246,45 @@ def rebuild_agent_config_reporting(*, _held_out: list[bool] | None = None) -> tu
 install_agent = rebuild_agent_config
 
 
+def _set_aside_damaged_main_spec(agent_file: Path) -> Path | None:
+    """Copy a main spec that was read but does not parse to ``<file>.damaged``.
+
+    Returns the copy's path, or ``None`` when the spec parses or cannot be read
+    at all. Every session start reads this one file, so a damaged copy failed
+    each of them until something else ran the rebuild, which already starts
+    such a file from defaults (:func:`_load_existing_config`). The copy keeps
+    what the user had; its name ends in ``.damaged``, which no agent scan reads.
+    An unreadable file (a permission, a lock) is left alone: its contents are
+    unknown, and the start reports the read error. So is a spec that is not a
+    plain file inside the agents directory (a symlink, for one) and one the
+    hardened, size-capped reader refuses: copying either out would launder a
+    file the agent may not open into one it can.
+    """
+    from kiro_crew.hooks import FileTooLargeError, safe_read_file_bytes
+
+    if not _spec_path_is_safe(agent_file, agent_file.parent):
+        return None
+    try:
+        raw = safe_read_file_bytes(str(agent_file))
+    except (OSError, FileTooLargeError):
+        return None
+    if raw is None:
+        return None
+    try:
+        if isinstance(loads_user_json(raw.decode("utf-8")), dict):
+            return None
+    except ValueError:
+        pass
+    from kiro_crew.atomic_write import atomic_write
+
+    keep = agent_file.with_name(agent_file.name + ".damaged")
+    # Owner-only, as the spec itself is: a damaged spec can still hold a
+    # client secret or a credential header. Rewritten on every set-aside, so an
+    # older, looser copy is replaced too.
+    atomic_write(keep, raw, restrict_to_owner=True)
+    return keep
+
+
 def ensure_agent_materialized(agent: str | None) -> bool:
     """Self-heal: guarantee the managed default agent config exists on disk.
 
@@ -1293,7 +1332,15 @@ def ensure_agent_materialized(agent: str | None) -> bool:
                 if shutil.which(expand_spec_args([rec["command"]])[0], path=mcp_search_path(""))
             ]
             last_read = _mcp_sources_read
-            if found:
+            damaged = _set_aside_damaged_main_spec(agent_file)
+            if damaged is not None:
+                logger.warning(
+                    "Managed agent config %s is not valid JSON; kept it as %s and "
+                    "rebuilding it before spawn",
+                    agent_file,
+                    damaged,
+                )
+            elif found:
                 logger.info(
                     "MCP server(s) %r dropped at the last rebuild now have their program; "
                     "rebuilding %s before spawn",

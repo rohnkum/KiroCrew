@@ -170,6 +170,19 @@ def _fake_backend(pid: int = 4242) -> Backend:
     return backend
 
 
+def _initialize_then_dead(backend: Backend) -> Any:
+    """A forward that answers ``initialize``, then finds its backend dead:
+    the process exited before the next frame, so that frame was never written."""
+
+    async def _forward(_stub: str, msg: dict[str, Any], **_kwargs: Any) -> None:
+        if msg.get("method") == "initialize":
+            backend.process.returncode = -9
+            return
+        raise BackendGone("stdout EOF")
+
+    return _forward
+
+
 async def _handle(
     reader: Any,
     writer: Any,
@@ -918,16 +931,86 @@ class TestBackendGoneHandling:
         assert reader.remaining == 1, "a terminal error must close the connection"
 
     @pytest.mark.asyncio
-    async def test_successful_respawn_replays_the_captured_initialize_and_retries(
+    async def test_successful_respawn_sends_the_request_to_the_replacement(
         self, peer_ok, monkeypatch
     ):
+        """The dead backend never got the request, so the replacement runs it.
+        An error reply instead was shown to the model by clients that do not
+        retry (KAS: ``backend restarted mid-call, retry: stdout EOF``)."""
         backend = _fake_backend()
-        backend.forward_from_stub = AsyncMock(  # type: ignore[method-assign]
-            side_effect=[None, BackendGone("pipe died")]
-        )
+        backend.forward_from_stub = _initialize_then_dead(backend)  # type: ignore[method-assign]
         monkeypatch.setattr(gw, "_acquire_backend", AsyncMock(return_value=(backend, True)))
 
         fresh = _fake_backend(pid=5151)
+        fresh.forward_from_stub = AsyncMock()  # type: ignore[method-assign]
+        inbox: asyncio.Queue[bytes] = asyncio.Queue()
+        replacement = asyncio.create_task(asyncio.Event().wait(), name="cov-drain")
+        monkeypatch.setattr(
+            gw, "_respawn_backend_for_stub", AsyncMock(return_value=(fresh, inbox, replacement))
+        )
+        call = {"jsonrpc": "2.0", "id": 2, "method": "tools/call"}
+        writer = _FakeWriter()
+        await _handle(
+            _ScriptedReader(
+                _register_frame(),
+                {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+                call,
+            ),
+            writer,
+            _fake_pool(),
+        )
+
+        assert fresh.forward_from_stub.await_args.args[1] == call
+        assert not any(f.get("id") == 2 for f in writer.frames())
+        replacement.cancel()
+
+    @pytest.mark.asyncio
+    async def test_a_request_whose_write_failed_is_not_replayed(self, peer_ok, monkeypatch):
+        """A write that failed on a live backend may have delivered the call,
+        so sending it again could run a mutation twice: it gets the retryable
+        error and the replacement never sees it."""
+        backend = _fake_backend()
+        backend.forward_from_stub = AsyncMock(  # type: ignore[method-assign]
+            side_effect=[None, BackendGone("stdin closed: broken pipe")]
+        )
+        monkeypatch.setattr(gw, "_acquire_backend", AsyncMock(return_value=(backend, True)))
+        fresh = _fake_backend(pid=5151)
+        fresh.forward_from_stub = AsyncMock()  # type: ignore[method-assign]
+        replacement = asyncio.create_task(asyncio.Event().wait(), name="cov-drain")
+        monkeypatch.setattr(
+            gw,
+            "_respawn_backend_for_stub",
+            AsyncMock(return_value=(fresh, asyncio.Queue(), replacement)),
+        )
+        writer = _FakeWriter()
+        await _handle(
+            _ScriptedReader(
+                _register_frame(),
+                {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+                {"jsonrpc": "2.0", "id": 2, "method": "tools/call"},
+            ),
+            writer,
+            _fake_pool(),
+        )
+
+        fresh.forward_from_stub.assert_not_awaited()
+        assert writer.frames()[-1]["error"]["message"] == (
+            "backend restarted mid-call, retry: stdin closed: broken pipe"
+        )
+        replacement.cancel()
+
+    @pytest.mark.asyncio
+    async def test_a_second_death_on_the_replacement_still_fails_the_request(
+        self, peer_ok, monkeypatch
+    ):
+        backend = _fake_backend()
+        backend.forward_from_stub = _initialize_then_dead(backend)  # type: ignore[method-assign]
+        monkeypatch.setattr(gw, "_acquire_backend", AsyncMock(return_value=(backend, True)))
+
+        fresh = _fake_backend(pid=5151)
+        fresh.forward_from_stub = AsyncMock(  # type: ignore[method-assign]
+            side_effect=BackendGone("died again")
+        )
         inbox: asyncio.Queue[bytes] = asyncio.Queue()
         replacement = asyncio.create_task(asyncio.Event().wait(), name="cov-drain")
         respawn_args: list[tuple[Any, ...]] = []
@@ -964,10 +1047,98 @@ class TestBackendGoneHandling:
             "id": 2,
             "error": {
                 "code": -32000,
-                "message": "backend restarted mid-call, retry: pipe died",
+                "message": "backend restarted mid-call, retry: died again",
             },
         }
         assert replacement.done(), "the replacement writer task is cancelled on exit"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "in_flight",
+        [
+            False,
+            True,
+            "apps",
+            "_lease_pending_riders",
+            "_lease_release_waiters",
+            "_lease_replacement_subscribes",
+            "settling",
+        ],
+    )
+    async def test_an_unshareable_backend_is_left_between_calls(
+        self, peer_ok, monkeypatch, in_flight
+    ):
+        """A shared backend that sent a request no chat owns is left on the
+        session's next request, and only when nothing of it is in flight
+        there: leaving detaches the stub, which drops the old answer."""
+        backend = _fake_backend()
+        backend.forward_from_stub = AsyncMock()  # type: ignore[method-assign]
+        backend.unshareable_reason = "server-initiated request without relatedRequestId"
+        apps_task = None
+        if in_flight == "apps":
+            # An MCP Apps interception holds a tool result it took off the
+            # pending table; leaving now would drop that result.
+            apps_task = asyncio.create_task(asyncio.Event().wait(), name="cov-apps")
+            backend._apps_tasks.add(apps_task)
+        elif in_flight == "settling":
+            # A response off the pending table, still being settled.
+            backend._settling = 1
+        elif isinstance(in_flight, str):
+            # A subscribe parked on a lease is answered only by this backend.
+            getattr(backend, in_flight)["file:///a"] = [(_STUB, 9)]
+        elif in_flight:
+            backend._pending_requests["gw-1"] = _PendingRequest(
+                stub_uuid=_STUB, original_id=7, method="tools/call"
+            )
+        monkeypatch.setattr(gw, "_acquire_backend", AsyncMock(return_value=(backend, True)))
+        fresh = _fake_backend(pid=5151)
+        fresh.forward_from_stub = AsyncMock()  # type: ignore[method-assign]
+        replacement = asyncio.create_task(asyncio.Event().wait(), name="cov-drain")
+        respawn = AsyncMock(return_value=(fresh, asyncio.Queue(), replacement))
+        monkeypatch.setattr(gw, "_respawn_backend_for_stub", respawn)
+        call = {"jsonrpc": "2.0", "id": 2, "method": "tools/call"}
+
+        await _handle(_ScriptedReader(_register_frame(), call), _FakeWriter(), _fake_pool())
+
+        if in_flight:
+            assert respawn.await_count == 0
+            assert backend.forward_from_stub.await_args.args[1] == call
+        else:
+            assert respawn.await_count == 1
+            assert fresh.forward_from_stub.await_args.args[1] == call
+        replacement.cancel()
+        if apps_task is not None:
+            apps_task.cancel()
+
+
+class TestInboxDrainCancel:
+    @pytest.mark.asyncio
+    async def test_a_payload_taken_but_not_written_goes_back_first(self) -> None:
+        """A respawn cancels the old drain while it waits for the socket's
+        write lock (a keepalive holds it). The payload it already took off the
+        inbox is written once the lock frees, before the cancel completes, so
+        the answer is not dropped and comes before what the inbox still holds."""
+        from kiro_crew.mcp_gateway.daemon.wire import _drain_inbox_to_stub
+
+        writer = _FakeWriter()
+        lock = asyncio.Lock()
+        writer._mc_write_lock = lock  # type: ignore[attr-defined]
+        inbox: asyncio.Queue[bytes] = asyncio.Queue()
+        await lock.acquire()
+        inbox.put_nowait(b"first\n")
+        drain = asyncio.create_task(_drain_inbox_to_stub(inbox, writer, "s1"))  # type: ignore[arg-type]
+        await async_wait_until(inbox.empty)
+        inbox.put_nowait(b"second\n")
+
+        drain.cancel()
+        await asyncio.sleep(0)
+        assert not drain.done(), "the cancel waits for the unwritten payload"
+        lock.release()
+        with pytest.raises(asyncio.CancelledError):
+            await drain
+
+        assert writer.writes == [b"first\n"]
+        assert inbox.get_nowait() == b"second\n"
 
 
 # --- disconnect-time cancel / recycle ---------------------------------------

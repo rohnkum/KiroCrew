@@ -12,11 +12,13 @@ patch of the method on the class or on an instance reaches every caller.
 Instance fields written: ``_dead_reason``, ``_grant_callers``,
 ``_last_ping_response_mono``, ``_lease_awaiting_grant``, ``_lease_awaiting_release``,
 ``_lease_pending_riders``, ``_lease_release_waiters``, ``_metric_tasks``,
-``_orphaned_leases``, ``_pending_requests``, ``_resource_subscriptions``.
+``_orphaned_leases``, ``_pending_requests``, ``_resource_subscriptions``,
+``_settling``, ``unshareable_reason``.
 
 Instance fields read: ``_gateway_ending``, ``_inbox_lock``, ``_init_state``,
 ``_stub_inboxes``, ``attempt_id``, ``backend_generation_id``, ``exclusive_token``,
-``pool_key``, ``process``, ``refcount``, ``stdout``, ``supports_caller_identity``.
+``pool_key``, ``process``, ``refcount``, ``stdin``, ``stdout``,
+``supports_caller_identity``.
 """
 
 from __future__ import annotations
@@ -57,6 +59,7 @@ from kiro_crew.mcp_gateway.backend_wire import (
     _log_safe_identifier,
     _PendingRequest,
     _tool_call_error_text,
+    _write_json_line,
 )
 from kiro_crew.mcp_gateway.image_budget import (
     line_may_carry_image_block,
@@ -412,15 +415,19 @@ async def _fail_claimed_request(
         # The handshake already settled before the raise; failing it now
         # would mark a ready backend dead with nobody left to answer.
         return
-    await self._settle(
-        pending,
-        {
-            "jsonrpc": "2.0",
-            "id": msg_id,
-            "error": {"code": _JSONRPC_SERVER_ERROR, "message": message},
-        },
-        verdict_unknown=True,
-    )
+    self._settling += 1
+    try:
+        await self._settle(
+            pending,
+            {
+                "jsonrpc": "2.0",
+                "id": msg_id,
+                "error": {"code": _JSONRPC_SERVER_ERROR, "message": message},
+            },
+            verdict_unknown=True,
+        )
+    finally:
+        self._settling -= 1
 
 
 async def _settle(
@@ -695,13 +702,22 @@ async def _route_backend_message(
                 msg_id,
             )
             return
-        if (
-            pending.retry_frame is not None
-            and _is_lost_session_error(msg)
-            and await self._retry_after_rehandshake(pending)
-        ):
-            return
-        await self._settle(pending, msg)
+        # Off the pending table but not yet delivered: settlement can await
+        # (a lease's compensating or replacement write), and it can answer
+        # other stubs than this one (lease riders), so a session moving off
+        # this backend in that window would drop an answer. Counted for the
+        # whole backend; ``daemon/connection._should_leave_unshareable`` waits.
+        self._settling += 1
+        try:
+            if (
+                pending.retry_frame is not None
+                and _is_lost_session_error(msg)
+                and await self._retry_after_rehandshake(pending)
+            ):
+                return
+            await self._settle(pending, msg)
+        finally:
+            self._settling -= 1
         return
     if method is not None and msg_id is None:
         # Gateway-internal: the backend's in-flight report. Consumed here,
@@ -816,9 +832,13 @@ async def _route_backend_message(
         # stubs and no relatedRequestId we cannot attribute a server->client
         # request to a tenant without risking a cross-tenant leak
         # (delivering B's sampling/elicitation to A, or broadcasting a
-        # request every tenant would answer). Refuse to keep pooling: recycle
-        # the backend so its stubs fall back to an unambiguous per-session
-        # exec. (Well-behaved servers set relatedRequestId -> Priority 1.)
+        # request every tenant would answer). The request goes to no chat:
+        # the server gets an error at once, as from a client without that
+        # capability. Killing the backend instead failed every co-tenant's
+        # in-flight call. A shared backend is marked so each attached
+        # connection moves to a private one on its next request
+        # (``daemon/connection.py``). (Well-behaved servers set
+        # relatedRequestId -> Priority 1.)
         if target_stub is not None:
             await self._deliver_to_stub(target_stub, msg)
         else:
@@ -827,12 +847,13 @@ async def _route_backend_message(
             reason = (
                 "server-initiated request without relatedRequestId while "
                 f"{nstubs} stubs share this backend; cannot route without a "
-                "cross-tenant leak — recycling"
+                "cross-tenant leak"
             )
-            logger.warning("backend pid=%s %s", self.pid, reason)
+            logger.warning("backend pid=%s %s; refused", self.pid, reason)
             self._record_hazard(hazards.HAZARD_UNROUTABLE_SERVER_REQUEST)
-            self._dead_reason = self._dead_reason or reason
-            await self._broadcast_backend_gone(reason)
+            if nstubs > 1:
+                self.unshareable_reason = self.unshareable_reason or reason
+            await self._reply_to_server_request(msg_id, reason)
         return
     logger.debug("backend pid=%s emitted malformed JSON-RPC: %r", self.pid, msg)
 
@@ -878,6 +899,25 @@ def _record_hazard(self: Backend, code: str, *, any_client: bool = False) -> Non
             name,
             code,
         )
+
+
+async def _reply_to_server_request(self: Backend, msg_id: Any, reason: str) -> None:
+    """Answer a server-to-client request the gateway delivers to no chat.
+
+    -32601 is what a client without the capability answers, so a server
+    already handles it. A server that waits for the answer is not left
+    hanging. A closed stdin means the backend is already dying, and that
+    path reports it.
+    """
+    frame = {
+        "jsonrpc": "2.0",
+        "id": msg_id,
+        "error": {"code": -32601, "message": f"not delivered: {reason}"},
+    }
+    try:
+        await _write_json_line(self.stdin, frame)
+    except (BrokenPipeError, ConnectionResetError):
+        logger.debug("backend pid=%s closed stdin before the refusal", self.pid)
 
 
 def _apply_inflight_report(self: Backend, msg: dict[str, Any]) -> None:

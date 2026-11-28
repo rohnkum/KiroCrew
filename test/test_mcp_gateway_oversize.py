@@ -86,8 +86,30 @@ class TestSpillToFile:
         assert spill_dir.exists()
         spill_files = list(spill_dir.iterdir())
         assert len(spill_files) == 1
-        spill_content = json.loads(spill_files[0].read_bytes())
-        assert spill_content["result"]["content"][0]["text"] == big_text
+        assert spill_files[0].suffix == ".txt"
+        assert spill_files[0].read_text(encoding="utf-8") == big_text
+
+    def test_spill_file_is_paged_with_the_read_tool_not_a_shell(self, tmp_path):
+        """The sidecar is the text itself, line for line, and the marker sends
+        the agent to its file read tool. The JSON-RPC line it held was one
+        line that only a shell could slice, and every such shell read asked
+        for approval on Windows until the chat timed out."""
+        big_text = "\n".join(f"row {i}" for i in range(60_000))
+        msg = {
+            "jsonrpc": "2.0",
+            "id": 7,
+            "result": {"content": [{"type": "text", "text": big_text}]},
+        }
+        line = json.dumps(msg, separators=(",", ":")).encode("utf-8") + b"\n"
+
+        with patch.dict(os.environ, {"KIROCREW_HOME": str(tmp_path)}):
+            result = maybe_spill_response(line, "big", 100_000)
+
+        text = json.loads(result)["result"]["content"][0]["text"]
+        assert "bash" not in text
+        assert "file read tool" in text
+        (spilled,) = (tmp_path / "mcp_spill").iterdir()
+        assert spilled.read_text(encoding="utf-8").splitlines()[59_999] == "row 59999"
 
     def test_spill_preserves_id(self, tmp_path):
         """Spilled response preserves the original JSON-RPC id."""

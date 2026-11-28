@@ -49,7 +49,7 @@ SHARED_BINDINGS_CHECKS = ("the_class_only_scan_can_fail",)
 #: A dataclass field is "data" when it has a plain default (a class attribute) and
 #: "annotation" when it has none or a ``default_factory``.
 _MEMBERS: dict[str, tuple[str, bool, str, str]] = {
-    "__init__": ("function", False, "b0b5bdb3423d", "backend"),
+    "__init__": ("function", False, "f165f3cc4c15", "backend"),
     "__post_init__": ("function", False, "b60c5fea256e", "backend"),
     "_apply_inflight_report": ("function", False, "44c5cabfd721", "backend_routing"),
     "_apps_declared_uris": ("annotation", False, "", ""),
@@ -109,6 +109,7 @@ _MEMBERS: dict[str, tuple[str, bool, str, str]] = {
     "_read_ui_resource": ("function", True, "ad837865fef2", "backend_mcp_apps"),
     "_record_hazard": ("function", False, "398422c29dc6", "backend_routing"),
     "_rekey_generation": ("annotation", False, "", ""),
+    "_reply_to_server_request": ("function", True, "5635e4d22766", "backend_routing"),
     "_release_upstream_subscriptions": ("function", True, "cc3d421ddfc2", "backend_leases"),
     "_reply_locally": ("function", True, "f8a4fcb66c0f", "backend_stubs"),
     "_report_backend_exit": ("function", True, "4decff571a3a", "backend_liveness"),
@@ -119,6 +120,7 @@ _MEMBERS: dict[str, tuple[str, bool, str, str]] = {
     "_route_backend_message": ("function", True, "90b4f8210134", "backend_routing"),
     "_served_tool_surfaces": ("annotation", False, "", ""),
     "_settle": ("function", True, "54ff2e0a03d4", "backend_routing"),
+    "_settling": ("data", False, "", ""),
     "_shutdown_lock": ("annotation", False, "", ""),
     "_spawn_metric_task": ("function", False, "13f007277a39", "backend_routing"),
     "_stderr_tail": ("annotation", False, "", ""),
@@ -170,6 +172,7 @@ _MEMBERS: dict[str, tuple[str, bool, str, str]] = {
     "storage_digest": ("property", False, "bb418bb7ece8", "backend"),
     "supports_caller_identity": ("data", False, "", ""),
     "touch": ("function", False, "ffb9b3a10afb", "backend"),
+    "unshareable_reason": ("data", False, "", ""),
 }
 
 _PACKAGE = "kiro_crew.mcp_gateway"
