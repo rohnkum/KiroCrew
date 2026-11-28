@@ -15,6 +15,16 @@ class TestCodeBlocksPassThroughVerbatim:
         # The delimiter itself is noise on a surface that renders no markup.
         assert "```" not in out
 
+    def test_two_blank_lines_inside_a_fence_are_kept(self) -> None:
+        # PEP 8 puts two blank lines between top-level functions; the prose
+        # collapse must not reach into the fence body.
+        out = to_plaintext("```py\ndef a():\n    pass\n\n\ndef b():\n    pass\n```")
+        assert out == "def a():\n    pass\n\n\ndef b():\n    pass"
+
+    def test_blank_runs_around_a_fence_still_collapse(self) -> None:
+        out = to_plaintext("a\n\n\n\n```\nx\n\n\n\ny\n```\n\n\n\nb")
+        assert out == "a\n\nx\n\n\n\ny\n\nb"
+
     def test_tilde_fence_is_honoured(self) -> None:
         out = to_plaintext("~~~\n# not a heading\n~~~")
         assert out == "# not a heading"

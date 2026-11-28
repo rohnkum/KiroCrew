@@ -81,9 +81,6 @@ _EMPHASIS_RES = (
     re.compile(r"~~([^~]+)~~"),
 )
 
-#: Three or more consecutive newlines collapse to a paragraph break.
-_BLANK_RUN_RE = re.compile(r"\n{3,}")
-
 
 def to_plaintext(text: str) -> str:
     """Flatten markdown to plain text, passing code-block contents through.
@@ -95,6 +92,9 @@ def to_plaintext(text: str) -> str:
         return ""
     out: list[str] = []
     fence: str | None = None
+    # True while the last line kept was a blank prose line, so a run of them
+    # collapses to one paragraph break; fence bodies never set or read it.
+    after_blank_prose = False
     for line in text.split("\n"):
         match = _FENCE_RE.match(line)
         if match is not None:
@@ -114,14 +114,23 @@ def to_plaintext(text: str) -> str:
             # Same character but shorter, or a different delimiter entirely:
             # content inside the fence, not a closer.
             out.append(line)
+            after_blank_prose = False
             continue
         if fence is not None:
             out.append(line)
+            after_blank_prose = False
             continue
-        out.append(_flatten_block(line))
+        flat = _flatten_block(line)
+        if not flat:
+            if after_blank_prose:
+                continue
+            after_blank_prose = True
+        else:
+            after_blank_prose = False
+        out.append(flat)
     # Trim blank lines only. A bare .strip() would eat the indentation of a
     # leading code line, which is semantic inside a fence.
-    return _BLANK_RUN_RE.sub("\n\n", "\n".join(out)).strip("\n")
+    return "\n".join(out).strip("\n")
 
 
 def _flatten_block(line: str) -> str:
