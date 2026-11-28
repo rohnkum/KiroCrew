@@ -69,4 +69,16 @@ describe('extractSteeringAcks', () => {
     expect(acks[0]).toContain('Stopped executing remaining commands')
     expect(cleaned).toBe('')
   })
+
+  it('returns a reply with no marker as written, blank lines inside a code block included', () => {
+    const input = 'Here:\n\n```py\ndef a():\n    pass\n\n\ndef b():\n    pass\n```\n\nDone.'
+    expect(extractSteeringAcks(input)).toEqual({ cleaned: input, acks: [] })
+  })
+
+  it('collapses only the seam of a removed marker and keeps a code block after it intact', () => {
+    const input = 'Before\n\n[STEERING steer-ab12: switched plan]\n\n```py\nx = 1\n\n\ny = 2\n```'
+    const { cleaned, acks } = extractSteeringAcks(input)
+    expect(acks).toEqual(['switched plan'])
+    expect(cleaned).toBe('Before\n\n```py\nx = 1\n\n\ny = 2\n```')
+  })
 })

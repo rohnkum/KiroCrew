@@ -23,12 +23,25 @@ function balancedClosers(content: string): Map<number, number> {
   return closers
 }
 
+/** Append `slice`, which follows a removed marker, without its leading newlines beyond the
+ *  one blank line the seam needs. Text elsewhere is never touched, so a code block keeps
+ *  every blank line it was written with. */
+function joinAtSeam(kept: string, slice: string): string {
+  let trailing = 0
+  while (trailing < 2 && kept[kept.length - 1 - trailing] === '\n') trailing++
+  let leading = 0
+  while (slice[leading] === '\n') leading++
+  const keep = Math.min(leading, 2 - trailing)
+  return kept + slice.slice(leading - keep)
+}
+
 export function extractSteeringAcks(content: string): { cleaned: string; acks: string[] } {
   const acks: string[] = []
   const lastClose = content.lastIndexOf(']')
   const closers = balancedClosers(content)
   let cleaned = ''
   let pos = 0
+  let afterMarker = false
   for (const head of content.matchAll(STEER_ACK_HEAD_RE)) {
     const start = head.index
     if (start > lastClose) break
@@ -38,10 +51,12 @@ export function extractSteeringAcks(content: string): { cleaned: string; acks: s
     const close = closers.get(start) ?? content.indexOf(']', summaryStart)
     const s = content.slice(summaryStart, close).trim()
     if (s) acks.push(s)
-    cleaned += content.slice(pos, start)
+    const before = content.slice(pos, start)
+    cleaned = afterMarker ? joinAtSeam(cleaned, before) : cleaned + before
+    afterMarker = true
     pos = close + 1
   }
-  cleaned += content.slice(pos)
-  // Collapse the blank line the removed marker leaves behind.
-  return { cleaned: cleaned.replace(/\n{3,}/g, '\n\n').trimEnd(), acks }
+  const rest = content.slice(pos)
+  cleaned = afterMarker ? joinAtSeam(cleaned, rest) : cleaned + rest
+  return { cleaned: cleaned.trimEnd(), acks }
 }
