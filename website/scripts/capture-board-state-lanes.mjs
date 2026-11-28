@@ -95,21 +95,19 @@ async function renderBoard(browser, base, columns, sidebarWidth = 0) {
   logPageProblems(page)
   await stubDashboardApi(page, {
     slots,
+    // The stub clears storage before it writes these, so the opt-in is the whole config.
+    localStorageEntries: {
+      'mc-chat-config': JSON.stringify({ tagColumnsEnabled: true }),
+      // Seeding lanes widens the sidebar to fit them (boardSidebarWidth); store the
+      // same width so the frame shows what a real user gets, not a clipped strip.
+      ...(sidebarWidth ? { 'mc-sidebar-width': String(sidebarWidth) } : {}),
+    },
     extra: async (path, route) => {
       if (path === '/api/chat/tags') { await json(route, tags); return true }
       if (path === '/api/chat/tag-columns') { await json(route, columns); return true }
       return false
     },
   })
-  // Registered after the stub's own init script, which clears storage first.
-  await page.addInitScript((width) => {
-    const cfg = JSON.parse(localStorage.getItem('mc-chat-config') || '{}')
-    cfg.tagColumnsEnabled = true
-    localStorage.setItem('mc-chat-config', JSON.stringify(cfg))
-    // Seeding lanes widens the sidebar to fit them (boardSidebarWidth); store the
-    // same width so the frame shows what a real user gets, not a clipped strip.
-    if (width) localStorage.setItem('mc-sidebar-width', String(width))
-  }, sidebarWidth)
   await page.goto(`${base}/chat`)
   await page.waitForSelector('[data-testid="column-strip"]', { timeout: 10000 })
   await page.waitForTimeout(600)

@@ -19,8 +19,14 @@ const out = process.argv[2] || join(process.env.KIROCREW_SCRATCH || 'temp-screen
 mkdirSync(out, { recursive: true })
 const { srv, base } = await serveDist()
 const tabs = [1, 2, 3, 4].map(n => ({ id: `fixture-terminal-${n}`, cwd: '/workspace' }))
+// Seeded once per context, not on every load: reloads must restore the value
+// written by the real rename action.
+const storageState = {
+  cookies: [],
+  origins: [{ origin: base, localStorage: [{ name: 'mc-bottom-terminal', value: JSON.stringify({ open: true, height: 320, tabs, activeId: tabs[0].id }) }] }],
+}
 
-/** Stub the API, seed four tabs and answer their WebSockets with a title + ready. */
+/** Stub the API with four live terminal sessions and answer their WebSockets with a title + ready. */
 async function preparePage(page, theme) {
   const errors = []
   page.on('pageerror', e => errors.push(e.message))
@@ -38,13 +44,9 @@ async function preparePage(page, theme) {
       return false
     },
   })
-  // Seed once: reloads must restore the value written by the real rename action.
-  await page.addInitScript(({ tabs }) => {
-    if (!localStorage.getItem('mc-bottom-terminal')) localStorage.setItem('mc-bottom-terminal', JSON.stringify({ open: true, height: 320, tabs, activeId: tabs[0].id }))
-    // The `open` flag is per window (sessionStorage) since the per-window fix;
-    // the layout's `open` is ignored at load.
-    sessionStorage.setItem('mc-bottom-terminal-open', '1')
-  }, { tabs })
+  // The `open` flag is per window (sessionStorage) since the per-window fix;
+  // the layout's `open` is ignored at load.
+  await page.addInitScript(() => sessionStorage.setItem('mc-bottom-terminal-open', '1'))
   const sockets = []
   const counts = { connections: 0, inputMessages: 0 }
   await page.routeWebSocket(/\/api\/ws\/terminal\//, ws => {
@@ -131,7 +133,7 @@ const results = []
 try {
   browser = await chromium.launch({ headless: true })
   for (const theme of ['dark', 'light']) {
-    const context = await browser.newContext({ viewport: { width: 1400, height: 900 }, deviceScaleFactor: 1 })
+    const context = await browser.newContext({ viewport: { width: 1400, height: 900 }, deviceScaleFactor: 1, storageState })
     const page = await context.newPage()
     page.setDefaultTimeout(12000)
     const { errors, sockets, counts } = await preparePage(page, theme)
@@ -237,7 +239,7 @@ try {
   // beside the selected pill. Playwright finalizes the file on context close.
   {
     const size = { width: 900, height: 420 }
-    const context = await browser.newContext({ viewport: size, deviceScaleFactor: 1, recordVideo: { dir: out, size } })
+    const context = await browser.newContext({ viewport: size, deviceScaleFactor: 1, recordVideo: { dir: out, size }, storageState })
     const page = await context.newPage()
     page.setDefaultTimeout(12000)
     const { errors } = await preparePage(page, 'dark')

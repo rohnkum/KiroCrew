@@ -66,20 +66,14 @@ async function render(browser, base, optIn) {
   logPageProblems(page)
   await stubDashboardApi(page, {
     slots,
+    // The stub clears storage before it writes these, so the opt-in is the whole config.
+    localStorageEntries: optIn ? { 'mc-chat-config': JSON.stringify({ tagColumnsEnabled: true }) } : null,
     extra: async (path, route) => {
       if (path === '/api/chat/tags') { await json(route, tags); return true }
       if (path === '/api/chat/tag-columns') { await json(route, columns); return true }
       return false
     },
   })
-  // Registered after the stub's own init script, which clears storage first.
-  if (optIn) {
-    await page.addInitScript(() => {
-      const cfg = JSON.parse(localStorage.getItem('mc-chat-config') || '{}')
-      cfg.tagColumnsEnabled = true
-      localStorage.setItem('mc-chat-config', JSON.stringify(cfg))
-    })
-  }
   await page.goto(`${base}/chat`)
   await page.waitForSelector('[data-slot-key]', { timeout: 10000 })
   await page.waitForTimeout(500)

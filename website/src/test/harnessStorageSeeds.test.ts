@@ -47,13 +47,18 @@ function onlySetsItems(fn: ts.Node | undefined): boolean {
     && fn.body.statements.every(s => ts.isExpressionStatement(s) && isSetItem(s.expression))
 }
 
-/** A `removeItem` or `clear` anywhere in the body: the stub's own clear already empties storage. */
-function removesItems(fn: ts.Node | undefined): boolean {
+/** A `localStorage` call to one of `methods` anywhere in the body. */
+function callsStorage(fn: ts.Node | undefined, methods: string[]): boolean {
   if (!fn || !(ts.isArrowFunction(fn) || ts.isFunctionExpression(fn))) return false
   const visit = (node: ts.Node): boolean =>
-    isStorageCall(node, 'removeItem') || isStorageCall(node, 'clear') || ts.forEachChild(node, visit) === true
+    methods.some(method => isStorageCall(node, method)) || ts.forEachChild(node, visit) === true
   return visit(fn.body)
 }
+
+/** The stub's own clear already empties storage. */
+const removesItems = (fn: ts.Node | undefined): boolean => callsStorage(fn, ['removeItem', 'clear'])
+/** The seed would depend on what ran before it: the stub's clear, or an earlier load. */
+const readsItems = (fn: ts.Node | undefined): boolean => callsStorage(fn, ['getItem'])
 
 function racingSeeds(files: string[], shape: (fn: ts.Node | undefined) => boolean): string[] {
   const program = ts.createProgram(files, { allowJs: true, noLib: true, noResolve: true, types: [] })
@@ -97,5 +102,10 @@ describe('harness localStorage seeds', () => {
   // A scenario that needs another seed opens a fresh page and stubs it once.
   it('leaves removing keys to the stub\'s clear', () => {
     expect(racingSeeds(harnessFiles(SCRIPTS), removesItems)).toEqual([])
+  })
+
+  // A seed is computed in Node, or written once per context through `storageState`.
+  it('never reads storage back to build a seed', () => {
+    expect(racingSeeds(harnessFiles(SCRIPTS), readsItems)).toEqual([])
   })
 })
