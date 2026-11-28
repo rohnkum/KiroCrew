@@ -49,7 +49,7 @@ import threading
 import time
 from dataclasses import dataclass
 
-from kiro_crew.computer_use import macos_ffi
+from kiro_crew.computer_use import enable_state, macos_ffi
 from kiro_crew.computer_use.policy import title_is_denied as _denied_title
 from kiro_crew.computer_use.types import (
     ERR_APP_NOT_FOUND,
@@ -139,20 +139,21 @@ def list_apps() -> tuple[AppRef, ...]:
     tree is empty.
     """
     seen: dict[int, AppRef] = {}
+    bot_name = enable_state.dashboard_bot_name()
     for info in macos_ffi.window_list():
         if info.layer != macos_ffi.CG_WINDOW_LAYER_NORMAL:
             continue
         if info.pid <= 0 or not info.owner_name:
             continue
         existing = seen.get(info.pid)
-        if existing is not None and _denied_title(existing.window_title):
+        if existing is not None and _denied_title(existing.window_title, bot_name):
             # Already holding a window whose TITLE trips the denylist. Never
             # replace it: input is delivered per-PID (``CGEventPostToPid``), so if
             # ANY window of this process is our own dashboard the whole process must
             # refuse. Keeping the innocuous first window would let a second Chrome
             # window hosting KiroCrew slip past the title rule entirely.
             continue
-        if existing is not None and not _denied_title(info.title):
+        if existing is not None and not _denied_title(info.title, bot_name):
             if existing.window_title or not info.title:
                 # Already have a window for this app, and either it is titled (good
                 # enough) or this candidate is not an improvement.

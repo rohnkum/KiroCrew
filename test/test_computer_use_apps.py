@@ -32,7 +32,7 @@ from pathlib import Path
 
 import pytest
 
-from kiro_crew.computer_use import apps_macos, macos_ffi, policy
+from kiro_crew.computer_use import apps_macos, enable_state, macos_ffi, policy
 from kiro_crew.computer_use.types import AppRef, ComputerUseError, PolicyConfig
 from kiro_crew.platform_compat import IS_POSIX
 
@@ -709,6 +709,47 @@ class TestBrowserHostedDashboardIsRefused:
         assert policy.check_app(native, PolicyConfig()) is not None
 
 
+class TestARenamedBotsDashboardTabIsRefused:
+    """The tab shows ``dashboard.bot_name`` where it would show "Kiro Crew".
+
+    The shell titles its tab ``[(N) ][<label> — ]<product>`` with the product set to
+    the configured bot name, so a renamed bot leaves no "Kiro Crew" in the title.
+    """
+
+    @staticmethod
+    def _edge(title: str) -> AppRef:
+        return AppRef(name="msedge", pid=99, bundle_id="msedge.exe", window_title=title)
+
+    @pytest.mark.parametrize(
+        "title",
+        [
+            "Settings — Atlas - Personal - Microsoft Edge",
+            "(2) Atlas - Google Chrome",  # the unread badge, on a route with no panel label
+            "Settings — Work — Atlas - Microsoft Edge",  # with dashboard.instance_label
+            "Security — Atlas and 2 more pages - Personal - Microsoft Edge",
+            "Atlas - Microsoft Edge",  # a route with no panel label
+            "Atlas and 2 more pages - Personal - Microsoft Edge",
+            "\u202aSettings — Atlas\u202c - Google Chrome",  # a right-to-left browser UI
+            "\u202aAtlas\u202c - Google Chrome",
+        ],
+    )
+    def test_the_tab_titled_with_the_configured_name_is_refused(self, title):
+        assert policy.check_app(self._edge(title), PolicyConfig(bot_name="Atlas")) is not None
+
+    @pytest.mark.parametrize(
+        "title",
+        ["Atlas notes - Notepad", "Jira — Atlassian - Google Chrome"],
+    )
+    def test_a_window_that_only_mentions_the_name_is_allowed(self, title):
+        assert policy.check_app(self._edge(title), PolicyConfig(bot_name="Atlas")) is None
+
+    def test_a_name_with_a_no_break_space_still_matches(self):
+        """The browser keeps a non-ASCII space in the title as the name holds it."""
+        title = "Settings — Atlas\u00a0Bot - Google Chrome"
+        cfg = PolicyConfig(bot_name="Atlas\u00a0Bot")
+        assert policy.check_app(self._edge(title), cfg) is not None
+
+
 class TestMultiWindowHostPrefersTheDeniedTitle:
     """A second Chrome window hosting the dashboard must not slip past.
 
@@ -762,6 +803,11 @@ class TestMultiWindowHostPrefersTheDeniedTitle:
     def test_a_browser_with_no_dashboard_window_is_untouched(self, monkeypatch):
         app = self._resolved(monkeypatch, ("Hacker News", "GitHub"))
         assert policy.check_app(app, PolicyConfig()) is None
+
+    def test_a_renamed_bots_dashboard_window_refuses_the_whole_process(self, monkeypatch):
+        monkeypatch.setattr(enable_state, "dashboard_bot_name", lambda: "Atlas")
+        app = self._resolved(monkeypatch, ("Hacker News", "Settings — Atlas"))
+        assert policy.check_app(app, PolicyConfig(bot_name="Atlas")) is not None
 
 
 # ── the Dock full-screen backstop: fail closed (pid_owns_point) ──

@@ -301,6 +301,14 @@ class TestPolicyConfig:
         # Even an explicit operator allow-list entry cannot lift the built-in floor.
         assert policy.check_app(ours, cfg) is not None
 
+    def test_the_configured_dashboard_bot_name_is_carried(self, state_dir, tmp_path, monkeypatch):
+        """The self-dashboard title rule needs the name the dashboard titles its tab with."""
+        monkeypatch.setattr(config_loader, "config_path", lambda: tmp_path / "config.json")
+        (tmp_path / "config.json").write_text(
+            json.dumps({"dashboard": {"bot_name": "Atlas"}}), encoding="utf-8"
+        )
+        assert enable_state.load_policy_config().bot_name == "Atlas"
+
 
 # ──────────────────────────────────────────────────────────────────────────
 # Writes

@@ -25,6 +25,7 @@ contract and the identical failure posture.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import logging
@@ -37,6 +38,7 @@ from kiro_crew.computer_use.types import (
     STATE_KEY_ENABLED,
     PolicyConfig,
 )
+from kiro_crew.config import live as config_live
 from kiro_crew.config import loader as config_loader
 from kiro_crew.config import loosening_provenance
 from kiro_crew.user_json import loads_user_json
@@ -201,7 +203,15 @@ def load_policy_config(state: "dict | None" = None) -> PolicyConfig:
     Note that an ABSENT ``allowed_apps`` is still the documented "no allow-list"
     case and is not an error.
     """
-    return PolicyConfig.from_state(load_state() if state is None else state)
+    keystone = PolicyConfig.from_state(load_state() if state is None else state)
+    return dataclasses.replace(keystone, bot_name=dashboard_bot_name())
+
+
+def dashboard_bot_name() -> str:
+    """The ``dashboard.bot_name`` in force, as the branding route serves it; ``""`` if unset."""
+    cfg = config_live.snapshot() or config_loader.KiroCrewConfig.load()
+    name = cfg.dashboard.bot_name
+    return name if isinstance(name, str) else ""
 
 
 def save_state(state: dict, *, resolving_pending: bool = False) -> None:

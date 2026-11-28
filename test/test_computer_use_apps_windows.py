@@ -21,7 +21,7 @@ from contextlib import contextmanager
 
 import pytest
 
-from kiro_crew.computer_use import apps_windows, policy
+from kiro_crew.computer_use import apps_windows, enable_state, policy
 from kiro_crew.computer_use import windows_ffi as ffi
 from kiro_crew.computer_use.types import AppRef, ComputerUseError, PolicyConfig
 
@@ -135,6 +135,23 @@ class TestTransientPopupsAreNotApplications:
         apps = apps_windows.list_apps()
         assert [app.window_title for app in apps] == ["Kiro Crew"]
         assert policy.check_app(apps[0], PolicyConfig()) is not None
+
+    def test_a_renamed_bots_dashboard_window_keeps_its_slot(self, monkeypatch) -> None:
+        monkeypatch.setattr(enable_state, "dashboard_bot_name", lambda: "Atlas")
+        denied = _info(
+            hwnd=7,
+            pid=901,
+            title="Settings — Atlas - Google Chrome",
+            cls="Microsoft.UI.Content.PopupWindowSiteBridge",
+            exe="chrome.exe",
+        )
+        sibling = _info(
+            hwnd=7, pid=901, title="Innocuous", cls="Chrome_WidgetWin_1", exe="chrome.exe"
+        )
+        monkeypatch.setattr(ffi, "window_list", lambda: (denied, sibling))
+        apps = apps_windows.list_apps()
+        assert [app.window_title for app in apps] == ["Settings — Atlas - Google Chrome"]
+        assert policy.check_app(apps[0], PolicyConfig(bot_name="Atlas")) is not None
 
 
 class TestFindWindowFor:

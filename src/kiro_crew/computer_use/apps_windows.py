@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import logging
 
-from kiro_crew.computer_use import policy, windows_ffi
+from kiro_crew.computer_use import enable_state, policy, windows_ffi
 from kiro_crew.computer_use.types import AppRef, ComputerUseError
 
 logger = logging.getLogger(__name__)
@@ -157,10 +157,10 @@ def _app_ref(info: windows_ffi.WindowInfo) -> AppRef:
     )
 
 
-def _denied_title(title: str) -> bool:
+def _denied_title(title: str, bot_name: str) -> bool:
     """Whether *title* trips the built-in denylist (Kiro Crew's own window)."""
     probe = AppRef(name="", pid=0, window_title=title)
-    return policy.denied_rule_for(probe) is not None
+    return policy.denied_rule_for(probe, bot_name) is not None
 
 
 def list_apps() -> tuple[AppRef, ...]:
@@ -195,6 +195,7 @@ def list_apps() -> tuple[AppRef, ...]:
     # from an empty desktop — and resolve_app would then name computer_list_apps
     # as the remedy, pointing the model at the call that just lied to it.
     seen: dict[int, AppRef] = {}
+    bot_name = enable_state.dashboard_bot_name()
     for info in windows_ffi.window_list():
         if info.class_name in _SHELL_CLASSES:
             continue
@@ -204,7 +205,7 @@ def list_apps() -> tuple[AppRef, ...]:
         # ``_denied_title`` guard below forbids ("a denied window is never overwritten
         # by an innocuous sibling"). A denylist rule matching this window's title means
         # this window must be refused, and it cannot be refused if it was never listed.
-        if _is_transient(info.class_name) and not _denied_title(info.title):
+        if _is_transient(info.class_name) and not _denied_title(info.title, bot_name):
             continue
         if info.pid <= 0:
             continue
@@ -213,7 +214,7 @@ def list_apps() -> tuple[AppRef, ...]:
         if not info.exe_name and not info.title.strip():
             continue
         existing = seen.get(info.root_hwnd)
-        if existing is not None and _denied_title(existing.window_title):
+        if existing is not None and _denied_title(existing.window_title, bot_name):
             continue
         seen[info.root_hwnd] = _app_ref(info)
     return tuple(seen.values())

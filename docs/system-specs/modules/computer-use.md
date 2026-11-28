@@ -434,7 +434,8 @@ removes its invocation-owned partial frame before degrading; it never sweeps a
 neighbouring capture owned by another call or process.
 
 **`computer_list_apps` omits only what the target policy refuses and what it cannot
-name.** `policy.check_app` drops Kiro Crew, any window titled Kiro Crew, and the apps
+name.** `policy.check_app` drops Kiro Crew, any window titled Kiro Crew (or titled
+like the dashboard tab of a renamed bot), and the apps
 the operator's `extra_denied_apps` and `allowed_apps` exclude. There is no per-app
 governance axis, so `gate.app_is_disclosable` is a shape check: an app with neither a
 bundle id nor a display name is dropped because there is nothing to show. Terminals
@@ -2699,14 +2700,28 @@ ONLY one, and the consequences should be stated rather than discovered:
   the app identity is Chrome's or Safari's and a bundle/name rule cannot fire at all
   (reviewer finding). `DeniedApp.title_substrings` matches the resolved window title,
   as a substring — the tab title takes a badge prefix (`(3) Kiro Crew`) and popouts a
-  `… — Kiro Crew` suffix. And because input is delivered per-PID
+  `… — Kiro Crew` suffix. The main tab shows `dashboard.bot_name` instead once the
+  operator renames the bot, so the same rule also matches that name where the tab puts
+  it: after the ` — ` every catalog's `app.tab_title` places before the product (ending
+  the title or followed by a space), or, on a title with no page label (after the
+  badge), as the whole title or followed by ` - `, ` — ` or ` and `. Not as a bare
+  substring, so "Atlas notes - Notepad" stays drivable under a bot named Atlas. Name
+  and title are compared lowercased, with whitespace collapsed and invisible format
+  characters (the direction marks a right-to-left browser adds) dropped.
+  `load_policy_config` carries the name on `PolicyConfig.bot_name`, and the
+  enumeration layer reads it through the same `enable_state.dashboard_bot_name`. And
+  because input is delivered per-PID
   (`CGEventPostToPid`), `apps_macos.list_apps` prefers a DENIED title over an
   innocuous one when one process owns several windows: a dashboard in a background
   tab must refuse the whole browser, not just that window.
 
   Accepted false positive, stated rather than discovered: any window whose title
   merely contains "kiro crew" is refused — an editor with this repo open, a browser
-  reading its source. The failure directions are not symmetric. Refusing an unrelated
+  reading its source — and, with a renamed bot, any window titled `… — <bot name>` or
+  holding `— <bot name> `, and, after an optional `(N) ` badge, titled `<bot name>` or
+  starting `<bot name> - `, `<bot name> — ` or `<bot name> and `, and a
+  `computer_launch_app` of an app with that name (the launch probe carries the name as
+  its title). The failure directions are not symmetric. Refusing an unrelated
   window is visible and recoverable (the refusal names the target); failing to refuse
   our own dashboard silently hands the agent its own security settings. A title is
   also the only signal available: the driver reads no page URL, and `AXURL` is not

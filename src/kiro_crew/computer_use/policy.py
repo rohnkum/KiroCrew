@@ -15,6 +15,8 @@ the same data reached through *the operator's own windows*.
 
 from __future__ import annotations
 
+import unicodedata
+
 from kiro_crew import security
 from kiro_crew.computer_use.types import (
     CLICK_METHOD_ACCESSIBILITY,
@@ -93,7 +95,9 @@ _DENIED_BUNDLE_PREFIXES: tuple[DeniedApp, ...] = (
         # is Chrome's or Safari's and the two lists above cannot fire. The window
         # title is the only signal that survives that hosting, so it carries the
         # same rule. Substrings, not exact strings: the tab title takes a badge
-        # prefix ("(3) Kiro Crew") and popouts a "<label> — Kiro Crew" suffix.
+        # prefix ("(3) Kiro Crew") and popouts a "<label> — Kiro Crew" suffix. A
+        # renamed bot's tab shows ``dashboard.bot_name`` instead, which
+        # ``denied_rule_for`` matches beside this table (``_shows_bot_name``).
         title_substrings=("kiro crew", "kirocrew"),
     ),
 )
@@ -107,7 +111,41 @@ def blocked_app_categories() -> tuple[dict[str, str], ...]:
     return tuple({"category": d.category, "reason": d.reason} for d in _DENIED_BUNDLE_PREFIXES)
 
 
-def denied_rule_for(app: AppRef) -> DeniedApp | None:
+def _fold(text: str) -> str:
+    """*text* lowercased, without invisible format characters, whitespace collapsed."""
+    visible = "".join(ch for ch in text if unicodedata.category(ch) != "Cf")
+    return " ".join(visible.split()).lower()
+
+
+def _shows_bot_name(title: str, bot_name: str) -> bool:
+    """Whether *title* shows *bot_name* where the dashboard tab puts it.
+
+    The shell titles its tab ``[(N) ][<label> — ]<product>``: every catalog's
+    ``app.tab_title`` puts `` — `` before the product, and the product is the bot name,
+    after the instance label when one is set. The browser then appends its own suffix
+    (`` - Google Chrome``, Edge's `` and 2 more pages - Personal - Microsoft Edge``).
+    So the name matches after that separator, ending the title or followed by a space,
+    or, on a title with no label (after the badge), as the whole title or followed by
+    `` - ``, `` — `` or `` and ``. Never as a bare substring: a short name
+    such as "Atlas" would refuse an unrelated "Atlas notes - Notepad". Both sides are
+    folded the same way, so neither a space the browser keeps (a no-break space) nor
+    the direction marks a right-to-left browser wraps a title in can make them differ.
+    """
+    name = _fold(bot_name)
+    if not name:
+        return False
+    title = _fold(title)
+    marker = f"— {name}"
+    if title.endswith(marker) or f"{marker} " in title:
+        return True
+    if title.startswith("("):
+        close = title.find(") ")
+        if close > 1 and title[1:close].isdigit():
+            title = title[close + 2 :]
+    return title == name or title.startswith((f"{name} - ", f"{name} — ", f"{name} and "))
+
+
+def denied_rule_for(app: AppRef, bot_name: str = "") -> DeniedApp | None:
     """Return the built-in denylist rule matching *app*, or ``None``.
 
     THREE independent signals, any one of which denies — a driver may know the
@@ -127,11 +165,17 @@ def denied_rule_for(app: AppRef) -> DeniedApp | None:
 
     The known false-positive cost, stated rather than discovered: any window whose
     title merely CONTAINS "kiro crew" is refused — a code editor with this repo open,
-    a browser reading this very PR. That is accepted because the failure directions
-    are not symmetric. Refusing an unrelated window is visible and recoverable (the
+    a browser reading this very PR — and, with a renamed bot, any window titled
+    ``… — <bot name>`` or holding ``— <bot name> ``, and, after an optional ``(N) ``
+    badge, titled ``<bot name>`` or starting ``<bot name> - ``, ``<bot name> — `` or
+    ``<bot name> and `` (so is launching an app of that name). That is accepted
+    because the failure directions are not
+    symmetric. Refusing an unrelated window is visible and recoverable (the
     refusal names the target); failing to refuse our own dashboard silently hands the
     agent its own security settings. A title is also the only signal available — the
     driver has no page URL, and ``AXURL`` is not read anywhere in this package.
+
+    *bot_name* is the operator's ``dashboard.bot_name`` (:func:`_shows_bot_name`).
     """
     bundle = (app.bundle_id or "").strip().lower()
     name = (app.name or "").strip().lower()
@@ -150,11 +194,13 @@ def denied_rule_for(app: AppRef) -> DeniedApp | None:
             return rule
         if title and any(sub.lower() in title for sub in rule.title_substrings):
             return rule
+        if rule.category == CATEGORY_KIROCREW_SELF and _shows_bot_name(title, bot_name):
+            return rule
     return None
 
 
-def title_is_denied(title: str) -> bool:
-    """Whether *title* alone trips a built-in denylist ``title_substrings`` rule.
+def title_is_denied(title: str, bot_name: str = "") -> bool:
+    """Whether *title* alone trips the built-in denylist's title rule.
 
     Exposed for the window-enumeration layer, which must decide WHICH window of a
     multi-window process to surface. Input is delivered per-PID
@@ -164,14 +210,15 @@ def title_is_denied(title: str) -> bool:
     window server happened to list first.
 
     Lives here, next to the table it reads, so the enumeration layer cannot drift
-    from the policy layer's idea of a denied title.
+    from the policy layer's idea of a denied title. *bot_name* is the same configured
+    name :func:`denied_rule_for` takes.
     """
     subject = (title or "").strip().lower()
     if not subject:
         return False
     return any(
         sub.lower() in subject for rule in _DENIED_BUNDLE_PREFIXES for sub in rule.title_substrings
-    )
+    ) or _shows_bot_name(subject, bot_name)
 
 
 def check_app(app: AppRef, cfg: PolicyConfig) -> str | None:
@@ -188,7 +235,7 @@ def check_app(app: AppRef, cfg: PolicyConfig) -> str | None:
     rather than "nothing" — the allow-list is an optional narrowing, not the
     primary enable (that lives on the keystone state file).
     """
-    rule = denied_rule_for(app)
+    rule = denied_rule_for(app, cfg.bot_name)
     if rule is not None:
         return REFUSAL_DENIED_APP.format(app=app.bundle_id or app.name, reason=rule.reason)
 

@@ -1222,10 +1222,15 @@ class PolicyConfig:
     denied). ``extra_denied_apps`` can only ADD to the built-in denylist —
     there is deliberately no mechanism to remove a built-in entry, so the
     floor in ``policy.py`` cannot be edited away from the dashboard.
+
+    ``bot_name`` is the one field that does not come from the keystone: it is
+    ``dashboard.bot_name`` from ``config.json``, the name the dashboard puts in its
+    browser tab title. It can only ADD the self-dashboard refusal, never remove one.
     """
 
     allowed_apps: tuple[str, ...] = ()
     extra_denied_apps: tuple[str, ...] = ()
+    bot_name: str = ""
 
     @classmethod
     def from_state(cls, state: Mapping[str, Any]) -> "PolicyConfig":
