@@ -10,32 +10,42 @@ Ported from Nous Research's Hermes Agent ``gateway/platforms/weixin.py``
 
 from __future__ import annotations
 
-import re
-
 from kiro_crew.messaging.renderer import chunk_for_transport
+from kiro_crew.messaging.split import (
+    FENCE_BODY,
+    FENCE_CLOSE,
+    FENCE_OPEN,
+    FENCE_OUTSIDE,
+    iter_fence_lines,
+)
 from kiro_crew.messaging.transport import TransportCapabilities
 from kiro_crew.security import redact_credentials, redact_exfiltration_urls
 
 WEIXIN_CHUNK_LIMIT = 4000
 
-_FENCE_RE = re.compile(r"^```([^\n`]*)\s*$")
+
+def _fence_lines(content: str) -> list[tuple[str, str]]:
+    """``(line, role)`` per line, read with the shared fence reader.
+
+    The reader knows backtick and tilde fences of any length and closes one only
+    with a run of the same character at least as long. It reads each line without
+    its leading whitespace, so a fence indented under a list item still counts, as
+    it always has here; every line comes back as written.
+    """
+    lines = (content or "").splitlines()
+    read = iter_fence_lines("\n".join(line.lstrip() for line in lines))
+    return [(line, role) for line, (_bare, role) in zip(lines, read)]
 
 
 def normalize_markdown(content: str) -> str:
     """Collapse >1 consecutive blank line (outside code fences); trim ends."""
-    lines = (content or "").splitlines()
     result: list[str] = []
-    in_code = False
     blank_run = 0
-    for raw in lines:
+    for raw, role in _fence_lines(content):
         line = raw.rstrip()
-        if _FENCE_RE.match(line.strip()):
-            in_code = not in_code
+        if role != FENCE_OUTSIDE:
             result.append(line)
             blank_run = 0
-            continue
-        if in_code:
-            result.append(line)
             continue
         if not line.strip():
             blank_run += 1
@@ -53,20 +63,18 @@ def split_markdown_blocks(content: str) -> list[str]:
         return []
     blocks: list[str] = []
     current: list[str] = []
-    in_code = False
-    for raw in content.splitlines():
+    for raw, role in _fence_lines(content):
         line = raw.rstrip()
-        if _FENCE_RE.match(line.strip()):
-            if not in_code and current:
+        if role in (FENCE_OPEN, FENCE_CLOSE):
+            if role == FENCE_OPEN and current:
                 blocks.append("\n".join(current).strip())
                 current = []
             current.append(line)
-            in_code = not in_code
-            if not in_code:
+            if role == FENCE_CLOSE:
                 blocks.append("\n".join(current).strip())
                 current = []
             continue
-        if in_code:
+        if role == FENCE_BODY:
             current.append(line)
             continue
         if not line.strip():

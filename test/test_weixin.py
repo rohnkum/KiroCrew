@@ -166,6 +166,35 @@ def test_normalize_markdown_preserves_blank_lines_inside_fences():
     assert normalize_markdown(src).count("\n\n\n") == 1
 
 
+_BLANKS_IN_FENCE = {
+    "tilde": "~~~py\ndef a():\n    pass\n\n\ndef b():\n    pass\n~~~",
+    "four-backtick": "````md\n```py\nx = 1\n```\n\n\nafter the inner fence\n````",
+    "four-backtick-plain": "````\nline one\n\n\n\nline two\n````",
+}
+
+
+@pytest.mark.parametrize("text", _BLANKS_IN_FENCE.values(), ids=list(_BLANKS_IN_FENCE))
+def test_a_tilde_or_longer_fence_keeps_its_blank_lines(text):
+    assert normalize_markdown(text) == text
+    assert render_chunks(text) == [text]
+
+
+def test_a_fence_indented_under_a_list_item_still_keeps_its_blank_lines():
+    text = "1. Run it:\n\n    ```py\n    a = 1\n\n\n    b = 2\n    ```"
+    assert normalize_markdown(text) == text
+    assert render_chunks(text) == [text]
+
+
+def test_a_shorter_or_other_run_does_not_close_a_fence():
+    text = "~~~\n```\n\n\n~~\nx\n~~~\n\n\n\nafter"
+    assert normalize_markdown(text) == "~~~\n```\n\n\n~~\nx\n~~~\n\nafter"
+
+
+def test_split_markdown_blocks_keeps_a_tilde_fence_as_one_block():
+    blocks = split_markdown_blocks("intro\n\n~~~\na=1\n\n\nb=2\n~~~\n\nouttro")
+    assert blocks == ["intro", "~~~\na=1\n\n\nb=2\n~~~", "outtro"]
+
+
 def test_split_markdown_blocks_keeps_a_fence_as_one_block():
     blocks = split_markdown_blocks("intro\n\n```py\na=1\n\nb=2\n```\n\nouttro")
     assert blocks[0] == "intro"
